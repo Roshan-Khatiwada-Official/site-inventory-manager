@@ -14,7 +14,7 @@ import { heldQuantity } from './utils/inventory';
 import * as api from './services/api';
 import { ApiError } from './services/api';
 import { LoginScreen } from './components/LoginScreen';
-import { Header } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { SitesView } from './components/SitesView';
 import { InventoryView } from './components/InventoryView';
 import { AssignmentsView } from './components/AssignmentsView';
@@ -426,19 +426,18 @@ export default function App() {
   const role = currentUser.role;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
-      <Header
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans md:flex">
+      <Sidebar
         currentUser={currentUser}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onLogout={handleLogout}
         onOpenProfile={() => setIsProfileOpen(true)}
-        isSyncing={false}
         pendingRequestCount={pendingRequestCount}
         outCount={itemsOutCount}
       />
 
-      <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 min-w-0 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8">
         {role === 'Admin' && activeTab === 'sites' && (
           <SitesView
             mode="admin"

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Pencil, Trash2, X, Package, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw } from 'lucide-react';
 import { InventoryItem, InventoryIssue, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { heldQuantity, availableQuantity, issueQuantity } from '../utils/inventory';
@@ -13,6 +13,27 @@ const CONDITION_STYLE: Record<IssueCondition, { label: string; badge: string; ic
   Lost: { label: 'Lost', badge: 'bg-slate-100 text-slate-600 border border-slate-300', icon: PackageX },
 };
 const ISSUE_CONDITIONS: IssueCondition[] = ['Flagged', 'Damaged', 'Lost'];
+
+const TONE_STYLE: Record<'slate' | 'emerald' | 'amber' | 'rose', string> = {
+  slate: 'bg-slate-100 text-slate-600',
+  emerald: 'bg-emerald-100 text-emerald-600',
+  amber: 'bg-amber-100 text-amber-600',
+  rose: 'bg-rose-100 text-rose-600',
+};
+
+const StatCard: React.FC<{
+  label: string; value: number; sub?: string; icon: React.ElementType; tone: 'slate' | 'emerald' | 'amber' | 'rose'; muted?: boolean;
+}> = ({ label, value, sub, icon: Icon, tone, muted }) => (
+  <div className={`bg-white border border-slate-200 rounded-xl p-3.5 flex items-center gap-3 ${muted ? 'opacity-60' : ''}`}>
+    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${TONE_STYLE[tone]}`}>
+      <Icon className="w-4.5 h-4.5" />
+    </div>
+    <div className="min-w-0">
+      <div className="text-lg font-bold text-slate-900 leading-none">{value}</div>
+      <div className="text-[11px] text-slate-500 mt-1 truncate">{label}{sub ? ` · ${sub}` : ''}</div>
+    </div>
+  </div>
+);
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -125,17 +146,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return map;
   }, [inventory]);
 
+  // A dashboard-style overview so the admin can see the health of the whole
+  // fleet at a glance, before scanning individual rows in the table.
+  const totals = useMemo(() => {
+    let totalUnits = 0, inStock = 0, assigned = 0;
+    const byIssue: Record<IssueCondition, number> = { Flagged: 0, Damaged: 0, Lost: 0 };
+    inventory.forEach(i => {
+      totalUnits += i.quantity;
+      inStock += availableQuantity(i);
+      assigned += heldQuantity(i);
+      ISSUE_CONDITIONS.forEach(c => { byIssue[c] += issueQuantity(i, c); });
+    });
+    return { totalItems: inventory.length, totalUnits, inStock, assigned, byIssue };
+  }, [inventory]);
+
+  const hasIssues = totals.byIssue.Flagged + totals.byIssue.Damaged + totals.byIssue.Lost > 0;
+  const hasFilters = !!(categoryFilter || statusFilter || workerFilter || q);
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Inventory</h2>
-          <p className="text-xs text-slate-500">Items the admin assigns to data collectors. Stock can be split across several people — and part of it can be reported flagged, damaged or lost without affecting the rest.</p>
+          <h2 className="text-xl font-bold text-slate-900">Inventory</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Stock can be split across several people, and part of it can be flagged, damaged or lost without affecting the rest.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setSeqOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow-sm">
-            <ListPlus className="w-4 h-4" /> Add Sequential Items
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-sm">
+            <ListPlus className="w-4 h-4" /> Add Sequential
           </button>
           <button onClick={() => { setEditing(null); setOpen(true); }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm">
@@ -144,70 +182,95 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       </div>
 
-      <div className="relative">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search inventory…"
-          className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      {/* Stat overview */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard label="Items" value={totals.totalItems} sub={`${totals.totalUnits} units`} icon={Package} tone="slate" />
+        <StatCard label="In stock" value={totals.inStock} icon={PackageCheck} tone="emerald" />
+        <StatCard label="Assigned" value={totals.assigned} icon={UserPlus} tone="amber" />
+        <StatCard label="Flagged" value={totals.byIssue.Flagged} icon={AlertTriangle} tone="amber" muted={totals.byIssue.Flagged === 0} />
+        <StatCard label="Damaged" value={totals.byIssue.Damaged} icon={Wrench} tone="rose" muted={totals.byIssue.Damaged === 0} />
+        <StatCard label="Lost" value={totals.byIssue.Lost} icon={PackageX} tone="slate" muted={totals.byIssue.Lost === 0} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">All categories</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">All statuses</option>
-          <option value="In stock">In stock</option>
-          <option value="Assigned">Assigned</option>
-          <option value="Flagged">Flagged</option>
-          <option value="Damaged">Damaged</option>
-          <option value="Lost">Lost</option>
-        </select>
-        <select value={workerFilter} onChange={e => setWorkerFilter(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">All field workers</option>
-          {dataCollectors.map(c => (
-            <option key={c.id} value={c.id}>{c.name} ({workerCounts.get(c.id) || 0})</option>
-          ))}
-        </select>
-        {(categoryFilter || statusFilter || workerFilter) && (
-          <button onClick={() => { setCategoryFilter(''); setStatusFilter(''); setWorkerFilter(''); }}
-            className="text-xs text-blue-600 hover:underline">Clear filters</button>
-        )}
+      {/* Toolbar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-3">
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, item ID or category…"
+            className="w-full pl-9 pr-4 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">All categories</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">All statuses</option>
+            <option value="In stock">In stock</option>
+            <option value="Assigned">Assigned</option>
+            <option value="Flagged">Flagged</option>
+            <option value="Damaged">Damaged</option>
+            <option value="Lost">Lost</option>
+          </select>
+          <select value={workerFilter} onChange={e => setWorkerFilter(e.target.value)}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">All field workers</option>
+            {dataCollectors.map(c => (
+              <option key={c.id} value={c.id}>{c.name} ({workerCounts.get(c.id) || 0})</option>
+            ))}
+          </select>
+          {hasFilters && (
+            <button onClick={() => { setCategoryFilter(''); setStatusFilter(''); setWorkerFilter(''); setQ(''); }}
+              className="text-xs text-blue-600 hover:underline ml-1">Clear filters</button>
+          )}
+          <span className="ml-auto text-[11px] text-slate-400">{filtered.length} of {inventory.length} items</span>
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500 text-left">
+            <thead className="bg-slate-50 text-slate-500 text-left border-b border-slate-200">
               <tr>
-                <th className="px-4 py-2.5 font-semibold">Item ID</th>
-                <th className="px-4 py-2.5 font-semibold">Name</th>
-                <th className="px-4 py-2.5 font-semibold">Category</th>
-                <th className="px-4 py-2.5 font-semibold">Qty</th>
-                <th className="px-4 py-2.5 font-semibold">Status</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
+                <th className="px-4 py-3 font-semibold">Item</th>
+                <th className="px-4 py-3 font-semibold">Category</th>
+                <th className="px-4 py-3 font-semibold">Qty</th>
+                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No inventory items yet.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                  {hasFilters ? 'No items match your filters.' : 'No inventory items yet.'}
+                </td></tr>
               )}
               {filtered.map(i => {
                 const held = heldQuantity(i);
                 const available = availableQuantity(i);
                 return (
-                  <tr key={i.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono text-slate-500">{i.itemId}</td>
-                    <td className="px-4 py-2.5 font-medium text-slate-900">
-                      {i.name}
-                      {i.note && <div className="text-[11px] text-slate-400 font-normal truncate max-w-[220px]">{i.note}</div>}
+                  <tr key={i.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                          <Package className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 truncate">{i.name}</div>
+                          <div className="font-mono text-[11px] text-slate-400">{i.itemId}</div>
+                          {i.note && <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{i.note}</div>}
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-4 py-2.5 text-slate-600">{i.category || '—'}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{i.quantity || 0}</td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-3 text-slate-600">
+                      {i.category ? (
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium">{i.category}</span>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700 font-medium">{i.quantity || 0}</td>
+                    <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-1">
                         {available > 0 && (
                           <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -232,13 +295,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         })}
                       </div>
                       {i.holders.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5">
                           {i.holders.map(h => (
-                            <span key={h.collectorId} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                            <span key={h.collectorId} className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-full pl-2 pr-1 py-0.5">
                               {h.collectorName || '—'}: {h.quantity}
                               <button
                                 onClick={() => setCheckingIn({ item: i, collectorId: h.collectorId, collectorName: h.collectorName, quantity: h.quantity })}
-                                className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded" title={`Check in from ${h.collectorName}`}>
+                                className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-white rounded-full" title={`Check in from ${h.collectorName}`}>
                                 <Undo2 className="w-3 h-3" />
                               </button>
                             </span>
@@ -246,22 +309,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button onClick={() => setManagingIssues(i)}
-                        className={`p-1.5 rounded hover:bg-slate-100 ${i.issues.length > 0 ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-blue-600'}`}
+                        className={`p-1.5 rounded-lg hover:bg-slate-100 ${i.issues.length > 0 ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-blue-600'}`}
                         title={i.issues.length > 0 ? 'Review reported issues' : 'Report damaged / lost / a problem'}>
                         <ShieldAlert className="w-3.5 h-3.5" />
                       </button>
                       {available > 0 && dataCollectors.length > 0 && (
-                        <button onClick={() => setAssigning(i)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded" title="Assign to a field worker">
+                        <button onClick={() => setAssigning(i)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg" title="Assign to a field worker">
                           <UserPlus className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button onClick={() => { setEditing(i); setOpen(true); }} title="Edit" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded">
+                      <button onClick={() => { setEditing(i); setOpen(true); }} title="Edit" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button onClick={() => onDelete(i.id)} disabled={held > 0}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded disabled:opacity-30"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg disabled:opacity-30"
                         title={held > 0 ? 'Item is with a collector' : 'Delete'}>
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -273,6 +336,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </table>
         </div>
       </div>
+
+      {hasIssues && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 inline-flex items-center gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5" /> Some items need attention — filter by status above to review them.
+        </p>
+      )}
 
       {recentActivity.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
