@@ -193,9 +193,6 @@ async function upsertAssignment(tx: Tx, a: Assignment) {
     await tx.collectionSession.createMany({
       data: a.sessions.map(s => ({
         id: s.id, assignmentId: a.id, date: s.date, hours: s.hours,
-        actualHours: s.actualHours ?? null,
-        verifiedByName: s.verifiedByName ?? null,
-        verifiedAt: s.verifiedAt ?? null,
         note: s.note ?? null,
         cameraId: s.cameraId ?? null,
         cameraName: s.cameraName ?? null,

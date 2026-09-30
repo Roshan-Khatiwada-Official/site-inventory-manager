@@ -2,8 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { MapPin, Send, Search, Building2, Clock, Lock, X } from 'lucide-react';
 import { Site, SiteRequest, Assignment } from '../types';
 import { byNewest } from '../utils/storage';
-import { actualHoursOf } from '../utils/collectionReport';
-
 interface AvailableSitesViewProps {
   sites: Site[];
   myRequests: SiteRequest[];
@@ -16,13 +14,8 @@ interface AvailableSitesViewProps {
 export const AvailableSitesView: React.FC<AvailableSitesViewProps> = ({ sites, myRequests, assignments, currentUserId, onRequest, onCancelRequest }) => {
   const [q, setQ] = useState('');
   const hoursBySite = useMemo(() => {
-    const m = new Map<string, { claimed: number; actual: number }>();
-    assignments.forEach(a => {
-      const e = m.get(a.siteId) || { claimed: 0, actual: 0 };
-      e.claimed += Number(a.hoursLogged) || 0;
-      e.actual += actualHoursOf(a);
-      m.set(a.siteId, e);
-    });
+    const m = new Map<string, number>();
+    assignments.forEach(a => { m.set(a.siteId, (m.get(a.siteId) || 0) + (Number(a.hoursLogged) || 0)); });
     return m;
   }, [assignments]);
   // A site already in the collector's My Work (Active or Completed) is
@@ -99,9 +92,7 @@ export const AvailableSitesView: React.FC<AvailableSitesViewProps> = ({ sites, m
                 <div>Found by: {s.foundByName || '—'}</div>
                 <div className="inline-flex items-center gap-1 font-medium text-slate-700">
                   <Clock className="w-3 h-3 text-blue-500" />
-                  {(hoursBySite.get(s.id)?.claimed || 0).toFixed(1)}h entered
-                  <span className="text-slate-300">/</span>
-                  <span className="text-emerald-600">{(hoursBySite.get(s.id)?.actual || 0).toFixed(1)}h actual</span> collected here
+                  {(hoursBySite.get(s.id) || 0).toFixed(1)}h collected here
                 </div>
                 {s.note && <div className="text-slate-400">{s.note}</div>}
               </div>

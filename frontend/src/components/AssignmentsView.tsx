@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, X, ClipboardList, Clock, Package } from 'lucide-react';
 import { Assignment, Site, InventoryItem, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
-import { actualHoursOf, hasVerifiedHours } from '../utils/collectionReport';
-
 interface AssignmentsViewProps {
   assignments: Assignment[];
   sites: Site[];
@@ -69,14 +67,6 @@ export const AssignmentsView: React.FC<AssignmentsViewProps> = ({
                     <td className="px-4 py-2.5">
                       <span className="inline-flex items-center gap-1 font-semibold text-slate-800">
                         <Clock className="w-3 h-3 text-blue-500" />{a.hoursLogged.toFixed(1)}h
-                        {hasVerifiedHours(a) ? (
-                          <>
-                            <span className="text-slate-300 font-normal">/</span>
-                            <span className="text-emerald-600">{actualHoursOf(a).toFixed(1)}h</span>
-                          </>
-                        ) : (
-                          <span className="text-slate-400 font-normal text-[11px]">(not verified)</span>
-                        )}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">

@@ -325,11 +325,6 @@ export default function App() {
     )));
   };
 
-  const verifySessionHours = (assignmentId: string, sessionId: string, actualHours: number) => withBusy(() => runAction(
-    () => api.verifySessionHours(assignmentId, sessionId, actualHours, currentUser?.name || 'Admin'),
-    ({ assignment }) => replaceAssignment(assignment)
-  ));
-
   // ---- request handlers ----
   const createRequest = (siteId: string) => {
     if (!currentUser) return;
@@ -481,7 +476,7 @@ export default function App() {
           <ReportsView sites={sites} assignments={assignments} users={users} />
         )}
         {role === 'Admin' && activeTab === 'shootreport' && (
-          <CollectionReportView assignments={assignments} sites={sites} inventory={inventory} onVerify={verifySessionHours} />
+          <CollectionReportView assignments={assignments} sites={sites} inventory={inventory} />
         )}
         {role === 'Admin' && activeTab === 'users' && (
           <UsersView

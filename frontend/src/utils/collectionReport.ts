@@ -1,23 +1,11 @@
 import { Assignment, CollectionSession, InventoryItem, Site } from '../types';
 
-/** Sum of only the sessions on an assignment the admin has actually verified — 0 until then, never the entered hours. */
-export function actualHoursOf(a: Assignment): number {
-  return a.sessions.reduce((sum, s) => sum + (s.actualHours != null ? s.actualHours : 0), 0);
-}
-
-/** Whether an assignment has at least one admin-verified session yet. */
-export function hasVerifiedHours(a: Assignment): boolean {
-  return a.sessions.some(s => s.actualHours != null);
-}
-
 /** One logged session, flattened with its site/collector context for reporting. */
 export interface FlatSession {
   assignmentId: string;
   sessionId: string;
-  date: string;              // YYYY-MM-DD, exactly as the collector entered it — never shifts on approval
-  claimedHours: number;      // what the collector entered
-  actualHours?: number;      // what the admin verified, if reviewed yet
-  effectiveHours: number;    // actualHours if verified, else claimedHours — used for the category/site/task totals
+  date: string;              // YYYY-MM-DD, exactly as the collector entered it
+  hours: number;             // exactly what the collector entered — the only figure this app tracks
   task: string;
   cameraCode: string;        // the camera's itemId (e.g. "CAM-001")
   cameraName: string;
@@ -36,16 +24,12 @@ export function flattenSessions(assignments: Assignment[], sites: Site[], invent
     const site = siteById.get(a.siteId);
     a.sessions.forEach((s: CollectionSession) => {
       if (!s.date) return;
-      const claimed = Number(s.hours) || 0;
-      const actual = s.actualHours;
       const cam = s.cameraId ? itemById.get(s.cameraId) : undefined;
       rows.push({
         assignmentId: a.id,
         sessionId: s.id,
         date: s.date,
-        claimedHours: claimed,
-        actualHours: actual,
-        effectiveHours: actual != null ? actual : claimed,
+        hours: Number(s.hours) || 0,
         task: s.task || '(no task recorded)',
         cameraCode: cam?.itemId || s.cameraId || '(no camera recorded)',
         cameraName: s.cameraName || cam?.name || '(no camera recorded)',
@@ -97,74 +81,65 @@ export function filterByScope(rows: FlatSession[], scope: ReportScope, refDate: 
   return rows.filter(r => r.date >= start && r.date <= end);
 }
 
-export interface TaskAgg { task: string; claimed: number; actual: number; }
-export interface SiteAgg { siteId: string; siteName: string; claimed: number; actual: number; tasks: TaskAgg[]; }
-export interface CategoryAgg { category: string; claimed: number; actual: number; sites: SiteAgg[]; }
+/** Filters rows to an explicit inclusive date range; either bound may be empty for "no limit". */
+export function filterByDateRange(rows: FlatSession[], from: string, to: string): FlatSession[] {
+  if (!from && !to) return rows;
+  return rows.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+}
 
-/** Category -> Site -> Task hours tree — entered (claimed) and actual (verified-if-available) hours, side by side. */
+export interface TaskAgg { task: string; hours: number; }
+export interface SiteAgg { siteId: string; siteName: string; hours: number; tasks: TaskAgg[]; }
+export interface CategoryAgg { category: string; hours: number; sites: SiteAgg[]; }
+
+/** Category -> Site -> Task hours tree, using exactly what each worker logged. */
 export function buildCategoryTree(rows: FlatSession[]): CategoryAgg[] {
-  const catMap = new Map<string, Map<string, { siteName: string; tasks: Map<string, { claimed: number; actual: number }> }>>();
+  const catMap = new Map<string, Map<string, { siteName: string; tasks: Map<string, number> }>>();
   rows.forEach(r => {
     if (!catMap.has(r.siteCategory)) catMap.set(r.siteCategory, new Map());
     const siteMap = catMap.get(r.siteCategory)!;
     if (!siteMap.has(r.siteId)) siteMap.set(r.siteId, { siteName: r.siteName, tasks: new Map() });
     const entry = siteMap.get(r.siteId)!;
-    const cur = entry.tasks.get(r.task) || { claimed: 0, actual: 0 };
-    entry.tasks.set(r.task, { claimed: cur.claimed + r.claimedHours, actual: cur.actual + r.effectiveHours });
+    entry.tasks.set(r.task, (entry.tasks.get(r.task) || 0) + r.hours);
   });
 
   const cats: CategoryAgg[] = [...catMap.entries()].map(([category, siteMap]) => {
     const sites: SiteAgg[] = [...siteMap.entries()].map(([siteId, entry]) => {
       const tasks: TaskAgg[] = [...entry.tasks.entries()]
-        .map(([task, h]) => ({ task, claimed: h.claimed, actual: h.actual }))
-        .sort((a, b) => b.actual - a.actual);
-      return {
-        siteId, siteName: entry.siteName,
-        claimed: tasks.reduce((s, t) => s + t.claimed, 0),
-        actual: tasks.reduce((s, t) => s + t.actual, 0),
-        tasks,
-      };
-    }).sort((a, b) => b.actual - a.actual);
-    return {
-      category,
-      claimed: sites.reduce((s, x) => s + x.claimed, 0),
-      actual: sites.reduce((s, x) => s + x.actual, 0),
-      sites,
-    };
-  }).sort((a, b) => b.actual - a.actual);
+        .map(([task, hours]) => ({ task, hours }))
+        .sort((a, b) => b.hours - a.hours);
+      return { siteId, siteName: entry.siteName, hours: tasks.reduce((s, t) => s + t.hours, 0), tasks };
+    }).sort((a, b) => b.hours - a.hours);
+    return { category, hours: sites.reduce((s, x) => s + x.hours, 0), sites };
+  }).sort((a, b) => b.hours - a.hours);
 
   return cats;
 }
 
-export interface CollectorTotal { collectorId: string; collectorName: string; claimed: number; actual: number; }
-export interface CollectorDay { collectorId: string; collectorName: string; date: string; claimed: number; actual: number; }
+export interface CollectorTotal { collectorId: string; collectorName: string; hours: number; }
+export interface CollectorDay { collectorId: string; collectorName: string; date: string; hours: number; }
 
 export function buildCollectorTotals(rows: FlatSession[]): CollectorTotal[] {
   const m = new Map<string, CollectorTotal>();
   rows.forEach(r => {
-    if (!m.has(r.collectorId)) m.set(r.collectorId, { collectorId: r.collectorId, collectorName: r.collectorName, claimed: 0, actual: 0 });
-    const e = m.get(r.collectorId)!;
-    e.claimed += r.claimedHours;
-    e.actual += r.actualHours != null ? r.actualHours : r.claimedHours;
+    if (!m.has(r.collectorId)) m.set(r.collectorId, { collectorId: r.collectorId, collectorName: r.collectorName, hours: 0 });
+    m.get(r.collectorId)!.hours += r.hours;
   });
-  return [...m.values()].sort((a, b) => b.claimed - a.claimed);
+  return [...m.values()].sort((a, b) => b.hours - a.hours);
 }
 
 export function buildCollectorDaily(rows: FlatSession[]): CollectorDay[] {
   const m = new Map<string, CollectorDay>();
   rows.forEach(r => {
     const key = r.collectorId + ' ' + r.date;
-    if (!m.has(key)) m.set(key, { collectorId: r.collectorId, collectorName: r.collectorName, date: r.date, claimed: 0, actual: 0 });
-    const e = m.get(key)!;
-    e.claimed += r.claimedHours;
-    e.actual += r.actualHours != null ? r.actualHours : r.claimedHours;
+    if (!m.has(key)) m.set(key, { collectorId: r.collectorId, collectorName: r.collectorName, date: r.date, hours: 0 });
+    m.get(key)!.hours += r.hours;
   });
   return [...m.values()].sort((a, b) => b.date.localeCompare(a.date) || a.collectorName.localeCompare(b.collectorName));
 }
 
 /** Shoot log CSV: Date, Data Collector, Cam Code, Task Name, Hour, Type, Site — one row per logged entry. */
 export function sessionsToCsv(rows: FlatSession[]): string {
-  const header = ['Date', 'Data Collector', 'Cam Code', 'Task Name', 'Hour', 'Actual Hour', 'Type', 'Site'];
+  const header = ['Date', 'Data Collector', 'Cam Code', 'Task Name', 'Hour', 'Type', 'Site'];
   const esc = (v: string | number) => {
     const s = String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -172,11 +147,7 @@ export function sessionsToCsv(rows: FlatSession[]): string {
   const lines = [header.map(esc).join(',')];
   const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.collectorName.localeCompare(b.collectorName));
   sorted.forEach(r => {
-    lines.push([
-      r.date, r.collectorName, r.cameraCode, r.task,
-      r.claimedHours.toFixed(2), r.actualHours != null ? r.actualHours.toFixed(2) : '',
-      r.siteCategory, r.siteName,
-    ].map(esc).join(','));
+    lines.push([r.date, r.collectorName, r.cameraCode, r.task, r.hours.toFixed(2), r.siteCategory, r.siteName].map(esc).join(','));
   });
   return lines.join('\n');
 }

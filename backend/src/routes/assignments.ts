@@ -126,13 +126,12 @@ assignmentsRouter.post('/:id/reopen', async (req, res) => {
   }
 });
 
-// A collector fixing their own mistake — locked once admin has verified it.
+// A collector fixing their own mistake.
 assignmentsRouter.patch('/:id/sessions/:sessionId', async (req, res) => {
   try {
     const updates = req.body as Partial<Pick<CollectionSession, 'date' | 'hours' | 'task' | 'cameraId' | 'cameraName' | 'cameraItemId'>>;
     const session = await prisma.collectionSession.findUnique({ where: { id: req.params.sessionId } });
     if (!session || session.assignmentId !== req.params.id) return res.status(404).json({ ok: false, error: 'Entry not found.' });
-    if (session.actualHours != null) return res.status(409).json({ ok: false, error: 'This entry has already been verified and can no longer be edited.' });
 
     await prisma.$transaction(async (tx) => {
       await tx.collectionSession.update({ where: { id: session.id }, data: updates });
@@ -150,7 +149,6 @@ assignmentsRouter.delete('/:id/sessions/:sessionId', async (req, res) => {
   try {
     const session = await prisma.collectionSession.findUnique({ where: { id: req.params.sessionId } });
     if (!session || session.assignmentId !== req.params.id) return res.status(404).json({ ok: false, error: 'Entry not found.' });
-    if (session.actualHours != null) return res.status(409).json({ ok: false, error: 'This entry has already been verified and cannot be deleted.' });
 
     await prisma.$transaction(async (tx) => {
       await tx.collectionSession.delete({ where: { id: session.id } });
@@ -161,24 +159,5 @@ assignmentsRouter.delete('/:id/sessions/:sessionId', async (req, res) => {
   } catch (err) {
     console.error('DELETE /api/assignments/:id/sessions/:sessionId failed:', err);
     res.status(500).json({ ok: false, error: 'Could not delete the entry.' });
-  }
-});
-
-// Admin verifies the actual hours collected for one logged entry.
-assignmentsRouter.post('/:id/sessions/:sessionId/verify', async (req, res) => {
-  try {
-    const { actualHours, verifiedByName } = req.body as { actualHours: number; verifiedByName: string };
-    const session = await prisma.collectionSession.findUnique({ where: { id: req.params.sessionId } });
-    if (!session || session.assignmentId !== req.params.id) return res.status(404).json({ ok: false, error: 'Entry not found.' });
-
-    await prisma.collectionSession.update({
-      where: { id: session.id },
-      data: { actualHours, verifiedByName: verifiedByName || 'Admin', verifiedAt: nowIso() },
-    });
-    await prisma.assignment.update({ where: { id: req.params.id }, data: { updatedAt: nowIso() } });
-    res.json({ ok: true, assignment: await loadAssignment(req.params.id) });
-  } catch (err) {
-    console.error('POST /api/assignments/:id/sessions/:sessionId/verify failed:', err);
-    res.status(500).json({ ok: false, error: 'Could not verify the entry. Nothing was changed.' });
   }
 });

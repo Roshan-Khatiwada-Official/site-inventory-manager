@@ -94,9 +94,6 @@ export interface CollectionSession {
   id: string;
   date: string;
   hours: number;
-  actualHours?: number;
-  verifiedByName?: string;
-  verifiedAt?: string;
   note?: string;
   cameraId?: string;
   cameraName?: string;

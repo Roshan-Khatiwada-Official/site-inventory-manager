@@ -3,8 +3,6 @@ import { Clock, MapPin, Package, CheckCircle2, Briefcase, Camera, Plus, X } from
 import { Assignment, Site, InventoryItem, CollectionSession } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { TASKS_BY_CATEGORY } from '../taskMasterlist';
-import { actualHoursOf, hasVerifiedHours } from '../utils/collectionReport';
-
 interface MyWorkViewProps {
   assignments: Assignment[];
   sites: Site[];
@@ -180,16 +178,7 @@ const AssignmentCard: React.FC<{
         </div>
         <div className="text-right">
           <div className="inline-flex items-center gap-1 text-sm font-bold text-slate-800">
-            <Clock className="w-4 h-4 text-blue-500" /> {a.hoursLogged.toFixed(1)}h entered
-            {hasVerifiedHours(a) && (
-              <>
-                <span className="text-slate-300">/</span>
-                <span className="text-emerald-600">{actualHoursOf(a).toFixed(1)}h actual</span>
-              </>
-            )}
-          </div>
-          <div className="text-[10px] text-slate-400">
-            {hasVerifiedHours(a) ? 'Total hours — calculated automatically; actual fills in once admin verifies' : 'Not verified by admin yet'}
+            <Clock className="w-4 h-4 text-blue-500" /> {a.hoursLogged.toFixed(1)}h
           </div>
           <div className="mt-1">
             <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
@@ -202,7 +191,6 @@ const AssignmentCard: React.FC<{
       {a.sessions.length > 0 && (
         <div className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500 space-y-1">
           {a.sessions.map((s) => {
-            const locked = s.actualHours != null;
             if (editingSessionId === s.id) {
               return (
                 <div key={s.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2 flex flex-wrap items-end gap-2">
@@ -248,19 +236,11 @@ const AssignmentCard: React.FC<{
                   {!s.cameraName && s.note ? ` — ${s.note}` : ''}
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
-                  <span className="font-medium text-slate-700">
-                    {s.hours}h{s.actualHours != null ? <span className="text-emerald-600"> / {s.actualHours}h actual</span> : ''}
-                  </span>
-                  {locked ? (
-                    <span className="text-[10px] text-slate-400">verified</span>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => startEdit(s)}
-                        className="text-[11px] font-semibold text-blue-600 hover:text-blue-700">Edit</button>
-                      <button type="button" onClick={() => onDeleteSession(a.id, s.id)}
-                        className="text-[11px] font-semibold text-rose-600 hover:text-rose-700">Delete</button>
-                    </>
-                  )}
+                  <span className="font-medium text-slate-700">{s.hours}h</span>
+                  <button type="button" onClick={() => startEdit(s)}
+                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-700">Edit</button>
+                  <button type="button" onClick={() => onDeleteSession(a.id, s.id)}
+                    className="text-[11px] font-semibold text-rose-600 hover:text-rose-700">Delete</button>
                 </span>
               </div>
             );

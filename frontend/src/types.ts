@@ -148,12 +148,9 @@ export interface InventoryItem {
 }
 
 export interface CollectionSession {
-  id: string;                  // stable id, so admin verification can address one entry
-  date: string;               // YYYY-MM-DD — set once by the collector; approving/verifying later never changes it
-  hours: number;               // entered hours, as the data collector claimed them
-  actualHours?: number;        // verified hours, filled in by admin during approval (undefined = not yet reviewed)
-  verifiedByName?: string;
-  verifiedAt?: string;
+  id: string;                  // stable id
+  date: string;               // YYYY-MM-DD — set once by the collector, never changes later
+  hours: number;               // exactly what the data collector entered — the only hours figure this app tracks
   note?: string;               // legacy free-form note
   cameraId?: string;           // inventory item id of the camera used
   cameraName?: string;         // denormalised

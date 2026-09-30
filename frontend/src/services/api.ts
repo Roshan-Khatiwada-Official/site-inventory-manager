@@ -98,8 +98,6 @@ export const updateSessionEntry = (
 ) => patch<{ assignment: Assignment }>(`/api/assignments/${assignmentId}/sessions/${sessionId}`, updates);
 export const deleteSessionEntry = (assignmentId: string, sessionId: string) =>
   del<{ assignment: Assignment }>(`/api/assignments/${assignmentId}/sessions/${sessionId}`);
-export const verifySessionHours = (assignmentId: string, sessionId: string, actualHours: number, verifiedByName: string) =>
-  post<{ assignment: Assignment }>(`/api/assignments/${assignmentId}/sessions/${sessionId}/verify`, { actualHours, verifiedByName });
 
 // ---- requests ----
 export const createRequest = (siteId: string, collectorId: string) =>
