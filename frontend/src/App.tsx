@@ -35,7 +35,7 @@ import {
   bridgePush,
   login as bridgeLogin,
   DEFAULT_BRIDGE_CONFIG,
-} from './services/bridge';
+} from './services/apiBridge';
 import { LoginScreen } from './components/LoginScreen';
 import { Header } from './components/Header';
 import { SitesView } from './components/SitesView';
@@ -145,7 +145,7 @@ export default function App() {
   useEffect(() => { saveStoredData('requests', requests); }, [requests]);
   useEffect(() => { saveStoredData('users', users); }, [users]);
 
-  // ---- Google Sheet sync ----
+  // ---- server sync ----
   const [bridgeConfig] = useState<BridgeConfig | null>(() => getStoredBridgeConfig());
   const [isSyncing, setIsSyncing] = useState(false);
   const [blockingLoad, setBlockingLoad] = useState<string | null>(null); // label while a big blocking load runs
@@ -177,7 +177,7 @@ export default function App() {
   const snapshotOf = (d: { sites: any; inventory: any; assignments: any; requests: any; users: any }) =>
     JSON.stringify([d.sites, d.inventory, d.assignments, d.requests, d.users]);
 
-  const applySheetData = (d: AppData) => {
+  const applyServerData = (d: AppData) => {
     hydratingRef.current = true;
     setSites(d.sites);
     setInventory(d.inventory);
@@ -200,10 +200,10 @@ export default function App() {
     setBlockingLoad('Loading your data…');
     busyRef.current = true;
     bridgePull(bridgeConfig)
-      .then(d => { if (!cancelled) applySheetData(d); })
+      .then(d => { if (!cancelled) applyServerData(d); })
       .catch(err => {
         console.error('Initial sheet pull failed:', err);
-        showToast('Could not load from Google Sheet — using local copy.');
+        showToast('Could not reach the server — using local copy.');
       })
       .finally(() => {
         if (cancelled) return;
@@ -296,7 +296,7 @@ export default function App() {
         setTimeout(() => { hydratingRef.current = false; }, 0);
       } catch (err) {
         console.error('Auto-sync failed:', err);
-        showToast('Auto-sync to Google Sheet failed — will retry on next change.');
+        showToast('Auto-sync failed — will retry on next change.');
       } finally {
         busyRef.current = false;
         pushPendingRef.current = false;
@@ -315,7 +315,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sites, inventory, assignments, requests, users]);
 
-  // Near-real-time: poll the sheet so changes from other people show up here.
+  // Near-real-time: poll the server so changes from other people show up
+  // here. Applied silently (no blocking overlay) — the merge itself is fast
+  // and happens in the background, so it shouldn't interrupt whatever the
+  // user is doing (typing, scrolling, mid-click) the way a full-screen
+  // "Updating…" overlay every few seconds used to.
   useEffect(() => {
     if (!bridgeConfig?.webAppUrl) return;
 
@@ -328,8 +332,8 @@ export default function App() {
         if (pushPendingRef.current) return; // a local edit landed while fetching
         const incoming = snapshotOf(d);
         if (incoming === snapshotRef.current) return;
-        // The sheet is trusted here (so other people's deletes reach us too);
-        // only truly-new, not-yet-synced local rows are preserved.
+        // The server is trusted here (so other people's deletes reach us
+        // too); only truly-new, not-yet-synced local rows are preserved.
         const base = lastSyncedRef.current;
         const merged: AppData = {
           sites: threeWayMerge(d.sites, sitesRef.current, base ? base.sites : null),
@@ -338,7 +342,6 @@ export default function App() {
           requests: threeWayMerge(d.requests, requestsRef.current, base ? base.requests : null),
           users: d.users.length ? threeWayMerge(d.users, usersRef.current, base ? base.users : null) : usersRef.current,
         };
-        setBlockingLoad('Updating…');
         hydratingRef.current = true;
         setSites(merged.sites);
         setInventory(merged.inventory);
@@ -346,11 +349,11 @@ export default function App() {
         setRequests(merged.requests);
         setUsers(merged.users);
         setCurrentUser(prev => (prev ? merged.users.find(u => u.id === prev.id) || prev : prev));
-        // Base = what the sheet actually has right now (not the merged local view,
-        // which may still contain not-yet-synced local additions).
+        // Base = what the server actually has right now (not the merged
+        // local view, which may still contain not-yet-synced local additions).
         snapshotRef.current = incoming;
         lastSyncedRef.current = d;
-        setTimeout(() => { hydratingRef.current = false; setBlockingLoad(null); schedulePushIfDirtyRef.current?.(); }, 350);
+        setTimeout(() => { hydratingRef.current = false; schedulePushIfDirtyRef.current?.(); }, 350);
       } catch {
         /* transient — try again next tick */
       } finally {
@@ -364,42 +367,20 @@ export default function App() {
     // stuck waiting on a callback chain that, for whatever reason, didn't
     // fire — it's retried here within a few seconds no matter what.
     const retryTimer = window.setInterval(() => schedulePushIfDirtyRef.current?.(), 4000);
+    // Refresh the moment the user comes back to the tab — no need to also
+    // poll on every tap/click, which was firing a network request on
+    // essentially every interaction in the app.
     const onVisible = () => { if (!document.hidden) poll(); };
-    // Refresh the moment the user comes back to / touches the screen.
-    let lastNudge = 0;
-    const nudge = () => {
-      const t = Date.now();
-      if (t - lastNudge > 4000) { lastNudge = t; poll(); }
-    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
-    window.addEventListener('pointerdown', nudge);
     return () => {
       window.clearInterval(timer);
       window.clearInterval(retryTimer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
-      window.removeEventListener('pointerdown', nudge);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeConfig]);
-
-  const manualPull = async () => {
-    if (!bridgeConfig?.webAppUrl) return;
-    setIsSyncing(true);
-    setBlockingLoad('Refreshing from Google Sheet…');
-    busyRef.current = true;
-    try {
-      applySheetData(await bridgePull(bridgeConfig));
-      showToast('Loaded latest data from Google Sheet.');
-    } catch (err: any) {
-      showToast(err?.message || 'Pull failed.');
-    } finally {
-      busyRef.current = false;
-      setIsSyncing(false);
-      setBlockingLoad(null);
-    }
-  };
 
   // ---- auth ----
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -961,7 +942,7 @@ export default function App() {
   );
 
   if (!currentUser && !initialSyncDone) {
-    return <LoadingOverlay show label="Loading data from Google Sheet…" />;
+    return <LoadingOverlay show label="Loading your data…" />;
   }
 
   if (!currentUser) {
@@ -987,7 +968,6 @@ export default function App() {
         onLogout={handleLogout}
         onOpenProfile={() => setIsProfileOpen(true)}
         isSyncing={isSyncing}
-        onManualPull={manualPull}
         pendingRequestCount={pendingRequestCount}
         outCount={itemsOutCount}
       />

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Boxes, RefreshCw, LogOut, DownloadCloud } from 'lucide-react';
+import { Boxes, RefreshCw, LogOut } from 'lucide-react';
 import { UserAccount } from '../types';
 
 interface HeaderProps {
@@ -9,7 +9,6 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenProfile: () => void;
   isSyncing: boolean;
-  onManualPull: () => void;
   pendingRequestCount: number;
   outCount: number;
 }
@@ -43,7 +42,6 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenProfile,
   isSyncing,
-  onManualPull,
   pendingRequestCount,
   outCount,
 }) => {
@@ -72,18 +70,11 @@ export const Header: React.FC<HeaderProps> = ({
                   ? 'bg-blue-600/20 text-blue-300 border-blue-500/40'
                   : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'
               }`}
-              title="Data is stored in the shared Google Sheet"
+              title="Data syncs automatically with the server"
             >
               <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncing ? 'Syncing…' : 'Sheet synced'}
+              {isSyncing ? 'Syncing…' : 'Synced'}
             </span>
-            <button
-              onClick={onManualPull}
-              title="Reload latest data from Google Sheet"
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
-            >
-              <DownloadCloud className="w-4 h-4" />
-            </button>
             <button
               onClick={onOpenProfile}
               title="My profile"

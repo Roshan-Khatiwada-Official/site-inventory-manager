@@ -1,6 +1,6 @@
 {
   "name": "Site & Inventory Manager",
-  "description": "Three-role field-operations app (Admin, Site Finder, Data Collector) for managing field sites, inventory, assignments and data-collection hours, backed by a shared Google Sheet.",
+  "description": "Three-role field-operations app (Admin, Site Finder, Data Collector) for managing field sites, inventory, assignments and data-collection hours, backed by a dedicated database.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

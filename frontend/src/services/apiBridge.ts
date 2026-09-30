@@ -2,11 +2,9 @@ import { Site, InventoryItem, Assignment, SiteRequest, UserAccount, CollectionSe
 import { sanitizeInventoryItem } from '../utils/inventory';
 
 /**
- * Client for the new backend/ API (Node + Express + Prisma + PostgreSQL).
- * Same full-read/full-write contract the old Google Sheets bridge
- * (./sheetsBridge.ts, kept for reference) had — App.tsx's merge/conflict
- * logic already assumes this shape, so switching transports needed no
- * change there, just this file and the one import in App.tsx.
+ * Client for the backend/ API (Node + Express + Prisma + PostgreSQL).
+ * Full-read/full-write contract — App.tsx's own merge/conflict logic decides
+ * what to do with what this returns; this file is just the transport.
  */
 
 export interface BridgeConfig {
