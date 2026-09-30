@@ -6,11 +6,7 @@ This is a monorepo with the frontend and backend as separate apps:
 
 ```
 frontend/   React + Vite SPA (the UI) — deployed to GitHub Pages
-backend/    Node + Express + Prisma API, backed by PostgreSQL — the new backend
-backend-legacy-apps-script/
-            The OLD backend: a Google Apps Script bridge to a Google Sheet.
-            Kept for reference / rollback during the Postgres migration —
-            not used once the frontend points at backend/.
+backend/    Node + Express + Prisma API, backed by PostgreSQL
 backups/    Timestamped full-database JSON snapshots (gitignored)
 ```
 
@@ -35,11 +31,9 @@ npm install
 npm run dev                 # http://localhost:3000
 ```
 
-The frontend currently talks to the legacy Google Sheets bridge
-(`frontend/src/services/sheetsBridge.ts`) — pointing it at the new backend
-instead is the next step of the migration (see `backend/README` once added).
-
-Live (GitHub Pages): **https://roshan-khatiwada-official.github.io/Site_and_Inventor_Management/**
+The frontend talks to `backend/` via `frontend/src/services/apiBridge.ts` —
+set `VITE_API_URL` in `frontend/.env` to point it at wherever the backend
+is running (defaults to `http://localhost:4000`).
 
 ---
 
@@ -48,8 +42,8 @@ Live (GitHub Pages): **https://roshan-khatiwada-official.github.io/Site_and_Inve
 A small field-operations app. **Site Finders** add field sites, **Data Collectors**
 request sites and log how many hours of data they collect, and the **Admin** manages
 the inventory, assigns collectors to sites (with inventory items), approves requests,
-and reads the reports. Data is moving from a shared Google Sheet to a dedicated
-PostgreSQL database (see **Repo layout** above).
+and reads the reports. Data is stored in a dedicated PostgreSQL database
+(see **Repo layout** above).
 
 ## Roles
 
@@ -94,23 +88,23 @@ Site location can be set three ways: **use current location** (on site), **paste
 - **Total hours per site** (+ who found it, + which collectors worked it).
 - **Total hours per data collector** (+ how many sites).
 
-## How the data is stored (Google Sheet = database)
+## How the data is stored (PostgreSQL)
 
-- A **Google Apps Script** ([`apps-script/Code.gs`](apps-script/Code.gs)) is deployed from
-  the Sheet as a Web App. Setup / redeploy steps: [`apps-script/README.md`](apps-script/README.md).
-- The Web App URL + token are built into the app, so **every device connects automatically** —
-  no Google sign-in for staff.
-- The app **loads from the Sheet on startup** and **writes every change back automatically**
-  (~2 s later), and every ~12 s it re-checks the sheet so other people's changes
-  appear on your screen automatically. One readable tab per collection (`Sites`,
-  `Inventory`, `Assignments`, `Requests`, `Users`) plus a hidden `_raw` tab that
-  holds the authoritative copy.
-  **Edit data through the app, not by typing in the tabs.**
+- `backend/` is a Node + Express API, backed by a PostgreSQL database, that the
+  frontend talks to over HTTP (`frontend/src/services/apiBridge.ts`).
+- The app **loads from the backend on startup** and **writes every change back
+  automatically** (~1 s later), and every ~6 s it re-checks the backend so other
+  people's changes appear on your screen automatically.
+- Data lives in real relational tables (`sites`, `inventory_items`, `assignments`,
+  `site_requests`, `users`, plus the inventory/assignment child tables) — see
+  `backend/prisma/schema.prisma` for the full shape.
+  **Edit data through the app**, or via Prisma Studio (`npm run prisma:studio`
+  in `backend/`) for a direct look.
 
 ```
- App (any device) ──auto-save on every edit──▶  Apps Script Web App ──▶  Google Sheet
-        ▲                                                                     │
-        └──────────────── auto-load on startup / manual "pull" ───────────────┘
+ App (any device) ──auto-save on every edit──▶  backend API ──▶  PostgreSQL
+        ▲                                                              │
+        └───────────────── auto-load on startup / poll ────────────────┘
 ```
 
 ## Typical workflow
@@ -128,7 +122,7 @@ flowchart TD
     I --> J[Marks the assignment done]
     J --> K[Admin 'Reports'\nhours per site, hours per collector,\nwho collected where, who found the site]
 
-    B -.auto-save.-> S[(Google Sheet)]
+    B -.auto-save.-> S[(PostgreSQL)]
     E -.auto-save.-> S
     I -.auto-save.-> S
     S -.loaded on startup by every device.-> A
@@ -147,5 +141,5 @@ Plain-text version:
 7. Admin           -> "Reports": total hours per site / per collector, who collected where,
                       and which Site Finder found each site
 
-Every step auto-saves to the shared Google Sheet; every device loads from it on startup.
+Every step auto-saves to PostgreSQL via the backend API; every device loads from it on startup.
 ```

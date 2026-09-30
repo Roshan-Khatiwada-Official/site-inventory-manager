@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
 import {
   ASSIGNMENT_STATUS_FROM_DB,
