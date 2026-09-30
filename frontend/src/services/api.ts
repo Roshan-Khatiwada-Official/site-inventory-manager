@@ -76,7 +76,12 @@ export const resolveItemIssue = (
   itemId: string, issueId: string,
   action: { type: 'clear' } | { type: 'reclassify'; condition: 'Damaged' | 'Lost'; note: string },
   resolvedByName: string
-) => post<{ item: InventoryItem }>(`/api/inventory/${itemId}/issues/${issueId}/resolve`, { ...action, resolvedByName });
+) => post<{ item: InventoryItem }>(`/api/inventory/${itemId}/issues/${issueId}/resolve`, {
+  action: action.type,
+  condition: action.type === 'reclassify' ? action.condition : undefined,
+  note: action.type === 'reclassify' ? action.note : undefined,
+  resolvedByName,
+});
 
 // ---- assignments ----
 export const saveAssignment = (assignment: Assignment, assignedById: string, assignedByName: string) =>
