@@ -1,175 +1,42 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
 import {
-  ASSIGNMENT_STATUS_FROM_DB,
   ASSIGNMENT_STATUS_TO_DB,
-  REQUEST_STATUS_FROM_DB,
   REQUEST_STATUS_TO_DB,
-  ROLE_FROM_DB,
   ROLE_TO_DB,
-  SITE_STATUS_FROM_DB,
   SITE_STATUS_TO_DB,
 } from './enums.js';
 import { hashPassword } from './auth.js';
-import type {
-  AppData,
-  Assignment,
-  InventoryItem,
-  Site,
-  SiteRequest,
-  UserAccount,
-} from '../types.js';
+import { inventoryItemInclude, toAssignment, toInventoryItem, toSite, toSiteRequest, toUser } from './mappers.js';
+import type { AppData, Assignment, InventoryItem, Site, SiteRequest, UserAccount } from '../types.js';
 
 type Tx = Prisma.TransactionClient;
 
-/** Read the whole database and serialize it into the exact shape the frontend expects. */
+/**
+ * Read the whole database and serialize it into the exact shape the
+ * frontend expects. Used for the initial load and the background poll —
+ * both read-only; every write goes through the granular routes in
+ * src/routes/ instead (see index.ts), which is where "the data actually
+ * changes" now lives.
+ */
 export async function readAppData(): Promise<AppData> {
   const [users, sites, inventory, assignments, requests] = await Promise.all([
     prisma.user.findMany(),
     prisma.site.findMany(),
-    prisma.inventoryItem.findMany({
-      include: { holders: true, issues: true, resolvedIssues: true, returnLog: true },
-    }),
+    prisma.inventoryItem.findMany({ include: inventoryItemInclude }),
     prisma.assignment.findMany({ include: { sessions: true } }),
     prisma.siteRequest.findMany(),
   ]);
 
-  const result: AppData = {
-    // Password is never sent to the client — even hashed, there's no reason
-    // a browser needs it. Login goes through POST /api/auth/login instead,
-    // which checks it server-side and never returns it either. Blank here,
-    // not omitted, since the frontend type still has the field (it's reused
-    // client-side as the "set a new password" input when creating/editing a
-    // login — see upsertUser below for how that round-trips safely).
-    users: users.map((u): UserAccount => ({
-      id: u.id,
-      loginId: u.loginId,
-      password: '',
-      name: u.name,
-      role: ROLE_FROM_DB[u.role],
-      status: u.status,
-      phone: u.phone,
-      email: u.email,
-      address: u.address,
-      notes: u.notes,
-      createdAt: u.createdAt,
-      updatedAt: u.updatedAt,
-      lastLogin: u.lastLogin ?? undefined,
-    })),
-    sites: sites.map((s): Site => ({
-      id: s.id,
-      code: s.code,
-      name: s.name,
-      category: s.category,
-      latitude: s.latitude,
-      longitude: s.longitude,
-      supervisor: s.supervisor,
-      supervisorContact: s.supervisorContact,
-      workerCount: s.workerCount,
-      note: s.note,
-      foundById: s.foundById ?? '',
-      foundByName: s.foundByName,
-      reservedById: s.reservedById ?? '',
-      reservedByName: s.reservedByName,
-      status: SITE_STATUS_FROM_DB[s.status],
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-    })),
-    inventory: inventory.map((i): InventoryItem => ({
-      id: i.id,
-      itemId: i.itemId,
-      name: i.name,
-      category: i.category,
-      quantity: i.quantity,
-      note: i.note,
-      holders: i.holders.map(h => ({ collectorId: h.collectorId, collectorName: '', quantity: h.quantity })),
-      issues: i.issues.map(x => ({
-        id: x.id,
-        condition: x.condition,
-        quantity: x.quantity,
-        note: x.note,
-        reportedAt: x.reportedAt,
-        reportedByCollectorId: x.reportedByCollectorId ?? undefined,
-        reportedByCollectorName: x.reportedByCollectorName ?? undefined,
-      })),
-      resolvedIssues: i.resolvedIssues.map(x => ({
-        id: x.id,
-        condition: x.condition,
-        quantity: x.quantity,
-        note: x.note,
-        reportedAt: x.reportedAt,
-        reportedByCollectorId: x.reportedByCollectorId ?? undefined,
-        reportedByCollectorName: x.reportedByCollectorName ?? undefined,
-        outcome: x.outcome,
-        resolvedAt: x.resolvedAt,
-        resolvedByName: x.resolvedByName,
-      })),
-      returnLog: i.returnLog.map(r => ({
-        date: r.date,
-        ok: r.ok,
-        note: r.note,
-        byName: r.byName,
-        fromCollectorId: r.fromCollectorId,
-        fromCollectorName: r.fromCollectorName,
-        quantity: r.quantity,
-      })),
-      createdAt: i.createdAt,
-      updatedAt: i.updatedAt,
-    })),
-    assignments: assignments.map((a): Assignment => ({
-      id: a.id,
-      siteId: a.siteId,
-      siteName: a.siteName,
-      collectorId: a.collectorId,
-      collectorName: a.collectorName,
-      assignedById: a.assignedById,
-      assignedByName: a.assignedByName,
-      status: ASSIGNMENT_STATUS_FROM_DB[a.status],
-      hoursLogged: a.hoursLogged,
-      sessions: a.sessions.map(s => ({
-        id: s.id,
-        date: s.date,
-        hours: s.hours,
-        actualHours: s.actualHours ?? undefined,
-        verifiedByName: s.verifiedByName ?? undefined,
-        verifiedAt: s.verifiedAt ?? undefined,
-        note: s.note ?? undefined,
-        cameraId: s.cameraId ?? undefined,
-        cameraName: s.cameraName ?? undefined,
-        cameraItemId: s.cameraItemId ?? undefined,
-        task: s.task ?? undefined,
-      })),
-      createdAt: a.createdAt,
-      updatedAt: a.updatedAt,
-    })),
-    requests: requests.map((r): SiteRequest => ({
-      id: r.id,
-      siteId: r.siteId,
-      siteName: r.siteName,
-      collectorId: r.collectorId,
-      collectorName: r.collectorName,
-      status: REQUEST_STATUS_FROM_DB[r.status],
-      requestedAt: r.requestedAt,
-      decidedAt: r.decidedAt ?? undefined,
-      updatedAt: r.updatedAt,
-    })),
-  };
-
-  return fillHolderNames(result);
-}
-
-// InventoryHolder.collectorName isn't a real column (the schema only keeps
-// collectorId — the name is looked up live from User so it can't drift).
-// Reading it back just needs the id; readAppData fills the name in via a
-// second pass so callers always get the same shape whether they just wrote
-// it or are reading fresh.
-async function fillHolderNames(data: AppData): Promise<AppData> {
-  const users = await prisma.user.findMany({ select: { id: true, name: true } });
   const nameById = new Map(users.map(u => [u.id, u.name]));
-  data.inventory.forEach(item => {
-    item.holders.forEach(h => { h.collectorName = nameById.get(h.collectorId) || h.collectorName; });
-  });
-  return data;
+
+  return {
+    users: users.map(toUser),
+    sites: sites.map(toSite),
+    inventory: inventory.map(i => toInventoryItem(i, nameById)),
+    assignments: assignments.map(toAssignment),
+    requests: requests.map(toSiteRequest),
+  };
 }
 
 /**
@@ -352,5 +219,3 @@ async function upsertRequest(tx: Tx, r: SiteRequest) {
   };
   await tx.siteRequest.upsert({ where: { id: r.id }, create: { id: r.id, ...common }, update: common });
 }
-
-export { fillHolderNames };

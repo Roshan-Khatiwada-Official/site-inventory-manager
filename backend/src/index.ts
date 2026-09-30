@@ -5,6 +5,11 @@ import { readAppData, writeAppData } from './lib/sync.js';
 import { prisma } from './lib/prisma.js';
 import { verifyPassword } from './lib/auth.js';
 import { ROLE_FROM_DB } from './lib/enums.js';
+import { sitesRouter } from './routes/sites.js';
+import { inventoryRouter } from './routes/inventory.js';
+import { assignmentsRouter } from './routes/assignments.js';
+import { requestsRouter } from './routes/requests.js';
+import { usersRouter } from './routes/users.js';
 
 const PORT = Number(process.env.PORT) || 4000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -76,10 +81,10 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Same full-read / full-write contract the old Google Sheets bridge had
-// (see frontend/src/services/sheetsBridge.ts) — the frontend's own
-// three-way-merge/conflict logic already assumes this shape, so it needs no
-// change beyond pointing at this URL instead.
+// Read-only bulk fetch — the initial load and the background poll (which
+// only ever reads; every actual write goes through the granular routes
+// below, one request per action, each with its own validation and its own
+// immediate success/failure response).
 app.get('/api/data', async (_req, res) => {
   try {
     const data = await readAppData();
@@ -90,6 +95,8 @@ app.get('/api/data', async (_req, res) => {
   }
 });
 
+// Bulk overwrite — kept only for the backup/import scripts (db:import-backup),
+// not used by the frontend, which writes through the granular routes below.
 app.post('/api/data', async (req, res) => {
   try {
     await writeAppData(req.body?.data ?? req.body);
@@ -99,6 +106,12 @@ app.post('/api/data', async (req, res) => {
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
+
+app.use('/api/sites', sitesRouter);
+app.use('/api/inventory', inventoryRouter);
+app.use('/api/assignments', assignmentsRouter);
+app.use('/api/requests', requestsRouter);
+app.use('/api/users', usersRouter);
 
 app.listen(PORT, () => {
   console.log(`siteops-backend listening on http://localhost:${PORT}`);
