@@ -485,9 +485,42 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
     return matchesQ && matchesFrom && matchesTo;
   });
 
+  // Pair each check-out with the check-in that closes it (same item + same
+  // person, next in time) so the two sit together — check-out on top,
+  // check-in directly below — instead of being scattered wherever they land
+  // in a flat time-sorted list. Pairs are then ordered newest-first.
+  const pairedRows = useMemo(() => {
+    const byKey = new Map<string, InventoryLog[]>();
+    filtered.forEach(l => {
+      const key = `${l.itemId}::${l.personId}`;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(l);
+    });
+    const units: { sortKey: string; rows: InventoryLog[] }[] = [];
+    byKey.forEach(list => {
+      const sorted = [...list].sort((a, b) => a.at.localeCompare(b.at));
+      const checkIns = sorted.filter(l => l.activity === 'Check In');
+      const usedCheckIns = new Set<string>();
+      sorted.filter(l => l.activity === 'Check Out').forEach(l => {
+        const match = checkIns.find(ci => !usedCheckIns.has(ci.id) && ci.at >= l.at);
+        if (match) {
+          usedCheckIns.add(match.id);
+          units.push({ sortKey: match.at, rows: [l, match] });
+        } else {
+          units.push({ sortKey: l.at, rows: [l] });
+        }
+      });
+      checkIns.forEach(ci => {
+        if (!usedCheckIns.has(ci.id)) units.push({ sortKey: ci.at, rows: [ci] });
+      });
+    });
+    units.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+    return units.flatMap(u => u.rows.map((log, idx) => ({ log, groupStart: idx === 0 })));
+  }, [filtered]);
+
   const exportCsv = () => {
     const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person'];
-    const rows = filtered.map(l => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName]);
+    const rows = pairedRows.map(({ log: l }) => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName]);
     const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -553,8 +586,8 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
               {!loading && filtered.length === 0 && (
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No check-in/check-out history yet.</td></tr>
               )}
-              {filtered.map(l => (
-                <tr key={l.id} className="hover:bg-slate-50">
+              {pairedRows.map(({ log: l, groupStart }) => (
+                <tr key={l.id} className={`hover:bg-slate-50 ${groupStart ? 'border-t-2 border-t-slate-200' : ''}`}>
                   <td className={`${td} text-slate-600 whitespace-nowrap`}>{formatLogDate(l.at)}</td>
                   <td className={`${td} font-medium text-slate-900`}>{l.itemName}</td>
                   <td className={`${td} font-mono text-slate-500`}>{l.itemCode}</td>
