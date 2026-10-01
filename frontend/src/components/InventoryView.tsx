@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight } from 'lucide-react';
 import { InventoryItem, InventoryIssue, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
-import { heldQuantity, availableQuantity, issueQuantity } from '../utils/inventory';
+import { heldQuantity, availableQuantity, issueQuantity, holderQuantity } from '../utils/inventory';
 import { CheckInModal } from './CheckInModal';
 
 type IssueCondition = InventoryIssue['condition'];
@@ -88,6 +88,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [assigning, setAssigning] = useState<InventoryItem | null>(null);
   const [checkingIn, setCheckingIn] = useState<CheckInTarget | null>(null);
+  const [bulkCheckInOpen, setBulkCheckInOpen] = useState(false);
   // The one place everything about a single item lives — holders, issues,
   // and the quick actions on them — instead of scattered icon buttons and
   // badges crammed into the table row. Tracked by id (not the object) so the
@@ -186,6 +187,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const hasIssues = totals.byIssue.Flagged + totals.byIssue.Damaged + totals.byIssue.Lost > 0;
   const hasFilters = !!(categoryFilter || statusFilter || workerFilter || q);
 
+  // Bulk check-in only makes sense once a specific worker is selected — it
+  // checks in everything that worker holds among the currently filtered
+  // items (e.g. worker + "Camera" category -> every camera they're holding).
+  const bulkTargets = useMemo(() => {
+    if (!workerFilter) return [];
+    const worker = dataCollectors.find(c => c.id === workerFilter);
+    return filtered
+      .map(item => ({ item, quantity: holderQuantity(item, workerFilter) }))
+      .filter(t => t.quantity > 0)
+      .map(t => ({ ...t, collectorName: worker?.name || '' }));
+  }, [filtered, workerFilter, dataCollectors]);
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -247,6 +260,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           {hasFilters && (
             <button onClick={() => { setCategoryFilter(''); setStatusFilter(''); setWorkerFilter(''); setQ(''); }}
               className="text-xs text-blue-600 hover:underline ml-1">Clear filters</button>
+          )}
+          {bulkTargets.length > 0 && (
+            <button onClick={() => setBulkCheckInOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm">
+              <PackageCheck className="w-3.5 h-3.5" /> Check in all ({bulkTargets.length})
+            </button>
           )}
           <span className="ml-auto text-[11px] text-slate-400">{filtered.length} of {inventory.length} items</span>
         </div>
@@ -366,6 +385,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           onConfirm={(qty, ok, note) => { onReturn(checkingIn.item.id, checkingIn.collectorId, qty, ok, note); setCheckingIn(null); }}
         />
       )}
+      {bulkCheckInOpen && bulkTargets.length > 0 && (
+        <BulkCheckInModal
+          collectorName={bulkTargets[0].collectorName}
+          targets={bulkTargets}
+          onClose={() => setBulkCheckInOpen(false)}
+          onConfirm={(ok, note) => {
+            bulkTargets.forEach(t => onReturn(t.item.id, workerFilter, t.quantity, ok, note));
+            setBulkCheckInOpen(false);
+          }}
+        />
+      )}
       {viewingItem && (
         <ItemDrawer
           item={viewingItem}
@@ -379,6 +409,90 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           onResolve={(issueId, action) => onResolveIssue(viewingItem.id, issueId, action)}
         />
       )}
+    </div>
+  );
+};
+
+/** Check in everything one worker holds among the currently filtered items, in one go. */
+const BulkCheckInModal: React.FC<{
+  collectorName: string;
+  targets: { item: InventoryItem; quantity: number }[];
+  onClose: () => void;
+  onConfirm: (ok: boolean, note: string) => void;
+}> = ({ collectorName, targets, onClose, onConfirm }) => {
+  const [ok, setOk] = useState<boolean | null>(null);
+  const [note, setNote] = useState('');
+  const totalQty = targets.reduce((s, t) => s + t.quantity, 0);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ok === null) return;
+    if (!ok && !note.trim()) return;
+    onConfirm(ok, note);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm sm:p-4">
+      <div className="bg-white sm:rounded-2xl w-full sm:max-w-md h-full sm:h-auto sm:max-h-[90vh] border border-slate-200 shadow-xl flex flex-col">
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center"><PackageCheck className="w-4 h-4" /></div>
+            <h3 className="font-bold text-slate-900 text-base">Check in all filtered items</h3>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200"><X className="w-5 h-5" /></button>
+        </div>
+
+        <form onSubmit={submit} className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 text-xs text-slate-700">
+          <p>
+            Checking in <strong className="text-slate-900">{totalQty}</strong> unit{totalQty === 1 ? '' : 's'} across{' '}
+            <strong className="text-slate-900">{targets.length}</strong> item{targets.length === 1 ? '' : 's'} from{' '}
+            <strong className="text-slate-900">{collectorName}</strong>, matching your current filters.
+          </p>
+
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto">
+            {targets.map(t => (
+              <div key={t.item.id} className="px-3 py-2 flex items-center justify-between">
+                <span className="font-medium text-slate-800 truncate">{t.item.name}</span>
+                <span className="text-slate-400 shrink-0 ml-2">× {t.quantity}</span>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className="font-semibold mb-1.5">Is everything in good condition?</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setOk(true)}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition ${ok === true ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                Yes — all OK
+              </button>
+              <button type="button" onClick={() => setOk(false)}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition ${ok === false ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                No — there is a problem
+              </button>
+            </div>
+          </div>
+
+          {ok === false && (
+            <div>
+              <label className="block font-semibold mb-1">What is wrong? *</label>
+              <textarea required rows={3} value={note} onChange={e => setNote(e.target.value)}
+                placeholder="e.g. one camera lens scratched"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+              <p className="mt-1 text-[11px] text-rose-600">Every item checked in here will be flagged with this note.</p>
+            </div>
+          )}
+
+          {ok === null && <p className="text-rose-600 text-[11px] font-medium">Choose Yes or No above before confirming.</p>}
+
+          <div className="sticky bottom-0 -mx-6 px-6 pt-3 pb-4 bg-white border-t border-slate-200 flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200">Cancel</button>
+            <button type="submit" disabled={ok === null || (ok === false && !note.trim())}
+              className="px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm disabled:opacity-40">
+              Confirm check-in
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
