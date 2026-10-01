@@ -449,11 +449,11 @@ const BulkCheckInModal: React.FC<{
             <strong className="text-slate-900">{collectorName}</strong>, matching your current filters.
           </p>
 
-          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto">
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto pr-2">
             {targets.map(t => (
-              <div key={t.item.id} className="px-3 py-2 flex items-center justify-between">
+              <div key={t.item.id} className="pl-3 pr-1 py-2 flex items-center justify-between gap-2">
                 <span className="font-medium text-slate-800 truncate">{t.item.name}</span>
-                <span className="text-slate-400 shrink-0 ml-2">× {t.quantity}</span>
+                <span className="text-slate-400 shrink-0">× {t.quantity}</span>
               </div>
             ))}
           </div>
