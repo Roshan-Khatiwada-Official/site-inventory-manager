@@ -196,8 +196,8 @@ inventoryRouter.get('/logs', async (_req, res) => {
 // replay/undo the stock movement that already happened.
 inventoryRouter.patch('/logs/:id', async (req, res) => {
   try {
-    const { at, activity, personName, quantity, ok, note, editedBy } = req.body as {
-      at?: string; activity?: 'Check In' | 'Check Out'; personName?: string; quantity?: number; ok?: boolean | null; note?: string; editedBy?: string;
+    const { at, activity, personName, quantity, ok, note, createdBy, editedBy } = req.body as {
+      at?: string; activity?: 'Check In' | 'Check Out'; personName?: string; quantity?: number; ok?: boolean | null; note?: string; createdBy?: string; editedBy?: string;
     };
     const existing = await prisma.inventoryLog.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ ok: false, error: 'Log entry not found.' });
@@ -210,6 +210,7 @@ inventoryRouter.patch('/logs/:id', async (req, res) => {
         ...(quantity !== undefined ? { quantity } : {}),
         ...(ok !== undefined ? { ok } : {}),
         ...(note !== undefined ? { note } : {}),
+        ...(createdBy !== undefined ? { createdBy } : {}),
         editedAt: nowIso(), editedBy: editedBy || 'Admin',
       },
     });

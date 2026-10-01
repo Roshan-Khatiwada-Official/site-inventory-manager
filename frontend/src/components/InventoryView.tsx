@@ -519,8 +519,8 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   }, [filtered]);
 
   const exportCsv = () => {
-    const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person'];
-    const rows = pairedRows.map(({ log: l }) => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName]);
+    const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person', 'Admin'];
+    const rows = pairedRows.map(({ log: l }) => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName, l.createdBy]);
     const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -577,14 +577,15 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                 <th className={th}>Activity</th>
                 <th className={th}>Person</th>
                 <th className={th}>Qty</th>
+                <th className={th}>Admin</th>
                 <th className={th}>Note</th>
                 <th className={`${th} w-10`}><span className="sr-only">Edit</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading && <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {loading && <tr><td colSpan={10} className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No check-in/check-out history yet.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-slate-400">No check-in/check-out history yet.</td></tr>
               )}
               {pairedRows.map(({ log: l, groupStart }) => (
                 <tr key={l.id} className={`hover:bg-slate-50 ${groupStart ? 'border-t-2 border-t-slate-200' : ''}`}>
@@ -599,6 +600,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                   </td>
                   <td className={`${td} text-slate-700`}>{l.personName}</td>
                   <td className={`${td} text-slate-700 font-medium`}>{l.quantity}</td>
+                  <td className={`${td} text-slate-500`}>{l.createdBy || '—'}</td>
                   <td className={`${td} text-slate-500 max-w-[160px] truncate`} title={l.note}>
                     {l.ok === false ? (l.note || 'Flagged') : (l.note || '—')}
                     {l.editedAt && <span className="text-slate-300"> · edited</span>}
@@ -635,7 +637,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
 const LogEditModal: React.FC<{
   log: InventoryLog;
   onClose: () => void;
-  onSave: (changes: { at: string; activity: 'Check In' | 'Check Out'; personName: string; quantity: number; ok: boolean | null; note: string }) => Promise<void>;
+  onSave: (changes: { at: string; activity: 'Check In' | 'Check Out'; personName: string; quantity: number; ok: boolean | null; note: string; createdBy: string }) => Promise<void>;
 }> = ({ log, onClose, onSave }) => {
   const [at, setAt] = useState(toDatetimeLocalUtc(log.at));
   const [activity, setActivity] = useState(log.activity);
@@ -643,6 +645,7 @@ const LogEditModal: React.FC<{
   const [quantity, setQuantity] = useState(log.quantity);
   const [ok, setOk] = useState<boolean | null>(log.ok);
   const [note, setNote] = useState(log.note);
+  const [createdBy, setCreatedBy] = useState(log.createdBy);
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -650,7 +653,7 @@ const LogEditModal: React.FC<{
     if (!personName.trim() || quantity <= 0 || !at) return;
     setSaving(true);
     try {
-      await onSave({ at: fromDatetimeLocalUtc(at), activity, personName: personName.trim(), quantity, ok, note: note.trim() });
+      await onSave({ at: fromDatetimeLocalUtc(at), activity, personName: personName.trim(), quantity, ok, note: note.trim(), createdBy: createdBy.trim() });
     } finally {
       setSaving(false);
     }
@@ -691,6 +694,13 @@ const LogEditModal: React.FC<{
             <label className="block font-semibold mb-1">Person *</label>
             <input value={personName} onChange={e => setPersonName(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+          </div>
+
+          <div>
+            <label className="block font-semibold mb-1">Admin</label>
+            <input value={createdBy} onChange={e => setCreatedBy(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+            <p className="mt-1 text-[10px] text-slate-400">The admin who processed this check-in/check-out.</p>
           </div>
 
           <div>

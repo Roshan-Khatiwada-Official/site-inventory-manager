@@ -87,7 +87,7 @@ export const resolveItemIssue = (
 export const getInventoryLogs = () => request<{ logs: InventoryLog[] }>('/api/inventory/logs');
 export const updateInventoryLog = (
   id: string,
-  changes: Partial<Pick<InventoryLog, 'at' | 'activity' | 'personName' | 'quantity' | 'ok' | 'note'>>,
+  changes: Partial<Pick<InventoryLog, 'at' | 'activity' | 'personName' | 'quantity' | 'ok' | 'note' | 'createdBy'>>,
   editedBy: string
 ) => patch<{ log: InventoryLog }>(`/api/inventory/logs/${id}`, { ...changes, editedBy });
 
