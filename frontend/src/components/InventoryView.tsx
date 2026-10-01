@@ -452,9 +452,9 @@ const BulkCheckInModal: React.FC<{
           <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
             <div className="divide-y divide-slate-100">
               {targets.map(t => (
-                <div key={t.item.id} className="px-3 py-2 flex items-center justify-between gap-2">
+                <div key={t.item.id} className="pl-3 py-2 flex items-center justify-between gap-2" style={{ paddingRight: 28 }}>
                   <span className="font-medium text-slate-800 truncate">{t.item.name}</span>
-                  <span className="text-slate-400 shrink-0">× {t.quantity}</span>
+                  <span className="text-slate-400 shrink-0 font-semibold">× {t.quantity}</span>
                 </div>
               ))}
             </div>
