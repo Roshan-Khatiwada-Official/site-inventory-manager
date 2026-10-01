@@ -138,14 +138,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ sites, assignments, us
           <option value="">All sites</option>
           {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded-lg bg-white">
+        <label className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg bg-white">
           <CalendarRange className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span className="text-[11px] text-slate-500 font-medium">From</span>
           <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
-            className="text-xs focus:outline-none w-[120px]" title="From date" />
-          <span className="text-slate-300">–</span>
+            className="text-xs focus:outline-none" />
+        </label>
+        <label className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg bg-white">
+          <CalendarRange className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span className="text-[11px] text-slate-500 font-medium">To</span>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-            className="text-xs focus:outline-none w-[120px]" title="To date" />
-        </div>
+            className="text-xs focus:outline-none" />
+        </label>
         {(collectorFilter || siteFilter || q || hasDateFilter) && (
           <button onClick={() => { setCollectorFilter(''); setSiteFilter(''); setQ(''); setFromDate(''); setToDate(''); }}
             className="text-xs text-blue-600 hover:underline">Clear filters</button>
