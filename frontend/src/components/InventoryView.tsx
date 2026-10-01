@@ -519,7 +519,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   }, [filtered]);
 
   const exportCsv = () => {
-    const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person', 'Admin'];
+    const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person', 'Logged By'];
     const rows = pairedRows.map(({ log: l }) => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName, l.createdBy]);
     const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -577,7 +577,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                 <th className={th}>Activity</th>
                 <th className={th}>Person</th>
                 <th className={th}>Qty</th>
-                <th className={th}>Admin</th>
+                <th className={th}>Logged By</th>
                 <th className={th}>Note</th>
                 <th className={`${th} w-10`}><span className="sr-only">Edit</span></th>
               </tr>
@@ -697,7 +697,7 @@ const LogEditModal: React.FC<{
           </div>
 
           <div>
-            <label className="block font-semibold mb-1">Admin</label>
+            <label className="block font-semibold mb-1">Logged by</label>
             <input value={createdBy} onChange={e => setCreatedBy(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
             <p className="mt-1 text-[10px] text-slate-400">The admin who processed this check-in/check-out.</p>
