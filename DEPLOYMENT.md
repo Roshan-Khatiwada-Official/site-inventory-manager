@@ -10,6 +10,7 @@ up later doesn't have to reverse-engineer it.
 | Frontend | Vercel (free) | https://site-inventory-manager.vercel.app |
 | Backend API | Render (free) | https://site-inventory-backend-mc1y.onrender.com |
 | Database | Neon Postgres (free) | managed via the Neon dashboard |
+| Source code | GitHub | https://github.com/Roshan-Khatiwada-Official/site-inventory-manager |
 
 ## Architecture
 
