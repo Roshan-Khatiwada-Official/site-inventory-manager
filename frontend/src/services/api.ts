@@ -11,6 +11,7 @@ import type {
   CollectionSession,
   InventoryIssue,
   InventoryItem,
+  InventoryLog,
   Site,
   SiteRequest,
   UserAccount,
@@ -65,8 +66,8 @@ export const deleteSite = (id: string, isAdmin: boolean) => del<{}>(`/api/sites/
 export const saveInventoryItem = (item: InventoryItem) => post<{ item: InventoryItem }>('/api/inventory', item);
 export const addInventoryBatch = (items: InventoryItem[]) => post<{ items: InventoryItem[] }>('/api/inventory/batch', { items });
 export const deleteInventoryItem = (id: string, isAdmin: boolean) => del<{}>(`/api/inventory/${id}?isAdmin=${isAdmin}`);
-export const assignInventoryQuantity = (itemId: string, collectorId: string, quantity: number) =>
-  post<{ item: InventoryItem }>(`/api/inventory/${itemId}/assign`, { collectorId, quantity });
+export const assignInventoryQuantity = (itemId: string, collectorId: string, quantity: number, byName: string) =>
+  post<{ item: InventoryItem }>(`/api/inventory/${itemId}/assign`, { collectorId, quantity, byName });
 export const returnInventoryItem = (itemId: string, collectorId: string, quantity: number, ok: boolean, note: string, byName: string) =>
   post<{ item: InventoryItem }>(`/api/inventory/${itemId}/return`, { collectorId, quantity, ok, note, byName });
 export const reportItemIssue = (
@@ -82,6 +83,13 @@ export const resolveItemIssue = (
   note: action.type === 'reclassify' ? action.note : undefined,
   resolvedByName,
 });
+
+export const getInventoryLogs = () => request<{ logs: InventoryLog[] }>('/api/inventory/logs');
+export const updateInventoryLog = (
+  id: string,
+  changes: Partial<Pick<InventoryLog, 'at' | 'activity' | 'personName' | 'quantity' | 'ok' | 'note'>>,
+  editedBy: string
+) => patch<{ log: InventoryLog }>(`/api/inventory/logs/${id}`, { ...changes, editedBy });
 
 // ---- assignments ----
 export const saveAssignment = (assignment: Assignment, assignedById: string, assignedByName: string) =>

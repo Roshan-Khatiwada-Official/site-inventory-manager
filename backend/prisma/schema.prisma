@@ -124,6 +124,7 @@ model InventoryItem {
   issues         InventoryIssue[]
   resolvedIssues ResolvedIssue[]
   returnLog      ReturnRecord[]
+  logs           InventoryLog[]
 
   @@map("inventory_items")
 }
@@ -188,6 +189,30 @@ model ReturnRecord {
   quantity           Int
 
   @@map("return_records")
+}
+
+// One row per check-in/check-out event — the full history/CSV log, kept
+// separate from ReturnRecord (which only tracks check-ins per item for the
+// item drawer) since this covers both directions across all items and is
+// manually editable by an admin after the fact.
+model InventoryLog {
+  id         String        @id @default(cuid())
+  item       InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId     String
+  itemName   String
+  itemCode   String
+  activity   String // 'Check In' | 'Check Out'
+  personId   String
+  personName String
+  quantity   Int
+  ok         Boolean?
+  note       String   @default("")
+  at         String // full ISO-8601 UTC datetime, second precision
+  createdBy  String   @default("")
+  editedAt   String?
+  editedBy   String?
+
+  @@map("inventory_logs")
 }
 
 model Assignment {

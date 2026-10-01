@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight } from 'lucide-react';
-import { InventoryItem, InventoryIssue, UserAccount } from '../types';
+import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight, History, Download, Save } from 'lucide-react';
+import { InventoryItem, InventoryIssue, InventoryLog, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { heldQuantity, availableQuantity, issueQuantity, holderQuantity } from '../utils/inventory';
 import { CheckInModal } from './CheckInModal';
+import { getInventoryLogs, updateInventoryLog } from '../services/api';
 
 type IssueCondition = InventoryIssue['condition'];
 
@@ -69,6 +70,7 @@ interface CheckInTarget {
 interface InventoryViewProps {
   inventory: InventoryItem[];
   dataCollectors: UserAccount[];
+  currentUserName: string;
   onSave: (item: InventoryItem) => void;
   onAddBatch: (items: InventoryItem[]) => void;
   onDelete: (id: string) => void;
@@ -81,8 +83,9 @@ interface InventoryViewProps {
 type StatusFilter = '' | 'In stock' | 'Assigned' | IssueCondition;
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
-  inventory, dataCollectors, onSave, onAddBatch, onDelete, onReportIssue, onResolveIssue, onAssign, onReturn,
+  inventory, dataCollectors, currentUserName, onSave, onAddBatch, onDelete, onReportIssue, onResolveIssue, onAssign, onReturn,
 }) => {
+  const [tab, setTab] = useState<'items' | 'history'>('items');
   const [open, setOpen] = useState(false);
   const [seqOpen, setSeqOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
@@ -218,6 +221,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-200">
+        <button onClick={() => setTab('items')}
+          className={`px-3.5 py-2 text-xs font-semibold border-b-2 -mb-px transition ${tab === 'items' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+          Items
+        </button>
+        <button onClick={() => setTab('history')}
+          className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border-b-2 -mb-px transition ${tab === 'history' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+          <History className="w-3.5 h-3.5" /> History / Logs
+        </button>
+      </div>
+
+      {tab === 'history' ? (
+        <InventoryHistoryTab currentUserName={currentUserName} />
+      ) : (
+      <>
       {/* Stat overview */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="Items" value={totals.totalItems} sub={`${totals.totalUnits} units`} icon={Package} tone="slate" />
@@ -351,6 +370,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
         </div>
       )}
+      </>
+      )}
 
       {open && (
         <InventoryModal
@@ -409,6 +430,259 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           onResolve={(issueId, action) => onResolveIssue(viewingItem.id, issueId, action)}
         />
       )}
+    </div>
+  );
+};
+
+// All timestamps are stored as UTC (GMT+0) ISO strings — displayed in that
+// same zone everywhere here, rather than silently shifting to the viewer's
+// local time, so the log stays consistent no matter who's reading it.
+function formatLogDate(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return iso || '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' });
+}
+function formatLogTime(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' }) + ' GMT';
+}
+function toDatetimeLocalUtc(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 19);
+}
+function fromDatetimeLocalUtc(value: string): string {
+  return value.length === 16 ? `${value}:00Z` : `${value}Z`;
+}
+function csvCell(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** Full check-in/check-out history across every item, with CSV export and manual admin correction. */
+const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUserName }) => {
+  const [logs, setLogs] = useState<InventoryLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [activityFilter, setActivityFilter] = useState<'' | 'Check In' | 'Check Out'>('');
+  const [editingLog, setEditingLog] = useState<InventoryLog | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    getInventoryLogs().then(({ logs }) => setLogs(logs)).catch(() => {}).finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const filtered = logs.filter(l => {
+    const t = q.toLowerCase();
+    const matchesQ = !t || l.itemName.toLowerCase().includes(t) || l.itemCode.toLowerCase().includes(t) || l.personName.toLowerCase().includes(t);
+    const matchesActivity = !activityFilter || l.activity === activityFilter;
+    return matchesQ && matchesActivity;
+  });
+
+  const exportCsv = () => {
+    const header = ['Date', 'Item', 'ID', 'Time', 'Activity', 'Person'];
+    const rows = filtered.map(l => [formatLogDate(l.at), l.itemName, l.itemCode, formatLogTime(l.at), l.activity, l.personName]);
+    const csv = [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventory-log-${todayStr()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const td = 'px-3 py-2.5';
+  const th = 'px-3 py-2.5 font-semibold';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by item, ID or person…"
+            className="pl-9 pr-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white w-64" />
+        </div>
+        <select value={activityFilter} onChange={e => setActivityFilter(e.target.value as any)}
+          className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">Check-in and check-out</option>
+          <option value="Check Out">Check Out only</option>
+          <option value="Check In">Check In only</option>
+        </select>
+        <span className="text-[11px] text-slate-400">{filtered.length} of {logs.length} entries · times shown in GMT+0</span>
+        <button onClick={exportCsv} disabled={filtered.length === 0}
+          className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm disabled:opacity-40">
+          <Download className="w-4 h-4" /> Export CSV
+        </button>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500 text-left border-b border-slate-200">
+              <tr>
+                <th className={th}>Date</th>
+                <th className={th}>Item</th>
+                <th className={th}>ID</th>
+                <th className={th}>Time (GMT+0)</th>
+                <th className={th}>Activity</th>
+                <th className={th}>Person</th>
+                <th className={th}>Qty</th>
+                <th className={th}>Note</th>
+                <th className={`${th} w-10`}><span className="sr-only">Edit</span></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading && <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No check-in/check-out history yet.</td></tr>
+              )}
+              {filtered.map(l => (
+                <tr key={l.id} className="hover:bg-slate-50">
+                  <td className={`${td} text-slate-600 whitespace-nowrap`}>{formatLogDate(l.at)}</td>
+                  <td className={`${td} font-medium text-slate-900`}>{l.itemName}</td>
+                  <td className={`${td} font-mono text-slate-500`}>{l.itemCode}</td>
+                  <td className={`${td} text-slate-600 whitespace-nowrap`}>{formatLogTime(l.at)}</td>
+                  <td className={td}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${l.activity === 'Check Out' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                      {l.activity}
+                    </span>
+                  </td>
+                  <td className={`${td} text-slate-700`}>{l.personName}</td>
+                  <td className={`${td} text-slate-700 font-medium`}>{l.quantity}</td>
+                  <td className={`${td} text-slate-500 max-w-[160px] truncate`} title={l.note}>
+                    {l.ok === false ? (l.note || 'Flagged') : (l.note || '—')}
+                    {l.editedAt && <span className="text-slate-300"> · edited</span>}
+                  </td>
+                  <td className={`${td} text-right`}>
+                    <button onClick={() => setEditingLog(l)} title="Edit this entry"
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editingLog && (
+        <LogEditModal
+          log={editingLog}
+          onClose={() => setEditingLog(null)}
+          onSave={async (changes) => {
+            const { log } = await updateInventoryLog(editingLog.id, changes, currentUserName);
+            setLogs(prev => prev.map(l => (l.id === log.id ? log : l)));
+            setEditingLog(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/** Admin correction of a single history row — edits the log entry only, not the stock it recorded. */
+const LogEditModal: React.FC<{
+  log: InventoryLog;
+  onClose: () => void;
+  onSave: (changes: { at: string; activity: 'Check In' | 'Check Out'; personName: string; quantity: number; ok: boolean | null; note: string }) => Promise<void>;
+}> = ({ log, onClose, onSave }) => {
+  const [at, setAt] = useState(toDatetimeLocalUtc(log.at));
+  const [activity, setActivity] = useState(log.activity);
+  const [personName, setPersonName] = useState(log.personName);
+  const [quantity, setQuantity] = useState(log.quantity);
+  const [ok, setOk] = useState<boolean | null>(log.ok);
+  const [note, setNote] = useState(log.note);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!personName.trim() || quantity <= 0 || !at) return;
+    setSaving(true);
+    try {
+      await onSave({ at: fromDatetimeLocalUtc(at), activity, personName: personName.trim(), quantity, ok, note: note.trim() });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm sm:p-4">
+      <div className="bg-white sm:rounded-2xl w-full sm:max-w-md h-full sm:h-auto sm:max-h-[90vh] border border-slate-200 shadow-xl flex flex-col">
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center"><Pencil className="w-4 h-4" /></div>
+            <div>
+              <h3 className="font-bold text-slate-900 text-base">Edit log entry</h3>
+              <p className="text-[11px] text-slate-400 font-mono">{log.itemName} · {log.itemCode}</p>
+            </div>
+          </div>
+          <button onClick={onClose} title="Close" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200"><X className="w-5 h-5" /></button>
+        </div>
+
+        <form onSubmit={submit} className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 text-xs text-slate-700">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Activity *</label>
+              <select value={activity} onChange={e => setActivity(e.target.value as 'Check In' | 'Check Out')}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <option value="Check Out">Check Out</option>
+                <option value="Check In">Check In</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Quantity *</label>
+              <input type="number" min={1} value={quantity} onChange={e => setQuantity(parseInt(e.target.value) || 0)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold mb-1">Person *</label>
+            <input value={personName} onChange={e => setPersonName(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+          </div>
+
+          <div>
+            <label className="block font-semibold mb-1">Date &amp; time (GMT+0) *</label>
+            <input type="datetime-local" step={1} value={at} onChange={e => setAt(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+            <p className="mt-1 text-[10px] text-slate-400">Entered and stored as GMT+0, precise to the second.</p>
+          </div>
+
+          {activity === 'Check In' && (
+            <div>
+              <p className="font-semibold mb-1.5">Condition</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setOk(true)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition ${ok === true ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                  OK
+                </button>
+                <button type="button" onClick={() => setOk(false)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition ${ok === false ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                  Problem
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block font-semibold mb-1">Note</label>
+            <textarea rows={2} value={note} onChange={e => setNote(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+          </div>
+
+          <div className="sticky bottom-0 -mx-6 px-6 pt-3 pb-4 bg-white border-t border-slate-200 flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200">Cancel</button>
+            <button type="submit" disabled={saving || !personName.trim() || quantity <= 0}
+              className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm disabled:opacity-40">
+              <Save className="w-3.5 h-3.5" /> Save changes
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };

@@ -132,6 +132,29 @@ export interface ResolvedIssue extends InventoryIssue {
   resolvedByName: string;
 }
 
+// One row of the full check-in/check-out history across all items, used by
+// the Inventory "History" tab, its CSV export, and admin edits — kept
+// separate from ReturnRecord (per-item check-in list only) since this spans
+// both directions (check-out on assign, check-in on return) and is
+// manually correctable after the fact. `at` is a full UTC (GMT+0)
+// timestamp, precise to the second.
+export interface InventoryLog {
+  id: string;
+  itemId: string;
+  itemName: string;           // denormalised, so it survives the item being renamed/deleted
+  itemCode: string;           // denormalised item ID
+  activity: 'Check In' | 'Check Out';
+  personId: string;
+  personName: string;         // denormalised
+  quantity: number;
+  ok: boolean | null;         // condition at check-in; null for check-out (not applicable)
+  note: string;
+  at: string;                 // full ISO-8601 UTC datetime, second precision
+  createdBy: string;          // admin who recorded the action
+  editedAt?: string;          // set if an admin corrected this entry afterwards
+  editedBy?: string;
+}
+
 export interface InventoryItem {
   id: string;
   itemId: string;             // human-readable code (required)

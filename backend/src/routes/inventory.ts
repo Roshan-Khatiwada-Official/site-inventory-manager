@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
-import { inventoryItemInclude, toInventoryItem } from '../lib/mappers.js';
+import { inventoryItemInclude, toInventoryItem, toInventoryLog } from '../lib/mappers.js';
 import { nowIso, todayStr, uid } from '../lib/ids.js';
 import type { InventoryItem } from '../types.js';
 
@@ -92,7 +92,7 @@ inventoryRouter.delete('/:id', async (req, res) => {
 // Give some (not necessarily all) of an item's remaining stock to a collector.
 inventoryRouter.post('/:id/assign', async (req, res) => {
   try {
-    const { collectorId, quantity } = req.body as { collectorId: string; quantity: number };
+    const { collectorId, quantity, byName } = req.body as { collectorId: string; quantity: number; byName?: string };
     if (!collectorId || !(quantity > 0)) return res.status(400).json({ ok: false, error: 'A collector and a positive quantity are required.' });
 
     const item = await prisma.inventoryItem.findUnique({ where: { id: req.params.id }, include: inventoryItemInclude });
@@ -100,13 +100,25 @@ inventoryRouter.post('/:id/assign', async (req, res) => {
     const available = availableQty(item);
     if (quantity > available) return res.status(409).json({ ok: false, error: `Only ${available} of "${item.name}" left in stock.` });
 
-    const existing = item.holders.find(h => h.collectorId === collectorId);
-    if (existing) {
-      await prisma.inventoryHolder.update({ where: { id: existing.id }, data: { quantity: existing.quantity + quantity } });
-    } else {
-      await prisma.inventoryHolder.create({ data: { itemId: item.id, collectorId, quantity } });
-    }
-    await prisma.inventoryItem.update({ where: { id: item.id }, data: { updatedAt: nowIso() } });
+    const users = await prisma.user.findMany({ select: { id: true, name: true } });
+    const collectorName = users.find(u => u.id === collectorId)?.name || '';
+
+    await prisma.$transaction(async (tx) => {
+      const existing = item.holders.find(h => h.collectorId === collectorId);
+      if (existing) {
+        await tx.inventoryHolder.update({ where: { id: existing.id }, data: { quantity: existing.quantity + quantity } });
+      } else {
+        await tx.inventoryHolder.create({ data: { itemId: item.id, collectorId, quantity } });
+      }
+      await tx.inventoryLog.create({
+        data: {
+          itemId: item.id, itemName: item.name, itemCode: item.itemId, activity: 'Check Out',
+          personId: collectorId, personName: collectorName, quantity, ok: null, note: '',
+          at: nowIso(), createdBy: byName || 'Admin',
+        },
+      });
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { updatedAt: nowIso() } });
+    });
     res.json({ ok: true, item: await loadItem(item.id) });
   } catch (err) {
     console.error('POST /api/inventory/:id/assign failed:', err);
@@ -136,10 +148,18 @@ inventoryRouter.post('/:id/return', async (req, res) => {
       if (qty >= holder.quantity) await tx.inventoryHolder.delete({ where: { id: holder.id } });
       else await tx.inventoryHolder.update({ where: { id: holder.id }, data: { quantity: holder.quantity - qty } });
 
+      const at = nowIso();
       await tx.returnRecord.create({
         data: {
-          itemId: item.id, date: todayStr(), ok, note: ok ? '' : (note || '').trim(),
+          itemId: item.id, date: at, ok, note: ok ? '' : (note || '').trim(),
           byName: byName || 'Admin', fromCollectorId: collectorId, fromCollectorName: collectorName, quantity: qty,
+        },
+      });
+      await tx.inventoryLog.create({
+        data: {
+          itemId: item.id, itemName: item.name, itemCode: item.itemId, activity: 'Check In',
+          personId: collectorId, personName: collectorName, quantity: qty, ok, note: ok ? '' : (note || '').trim(),
+          at, createdBy: byName || 'Admin',
         },
       });
       if (!ok) {
@@ -156,6 +176,47 @@ inventoryRouter.post('/:id/return', async (req, res) => {
   } catch (err) {
     console.error('POST /api/inventory/:id/return failed:', err);
     res.status(500).json({ ok: false, error: 'Could not check in the item. Nothing was changed.' });
+  }
+});
+
+// Full check-in/check-out history across every item, newest first — backs
+// the Inventory "History" tab and its CSV export.
+inventoryRouter.get('/logs', async (_req, res) => {
+  try {
+    const logs = await prisma.inventoryLog.findMany({ orderBy: { at: 'desc' } });
+    res.json({ ok: true, logs: logs.map(toInventoryLog) });
+  } catch (err) {
+    console.error('GET /api/inventory/logs failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load the history.' });
+  }
+});
+
+// An admin correcting a log entry after the fact (wrong time, wrong person,
+// typo in the note, etc.) — this only edits the log row itself, it does not
+// replay/undo the stock movement that already happened.
+inventoryRouter.patch('/logs/:id', async (req, res) => {
+  try {
+    const { at, activity, personName, quantity, ok, note, editedBy } = req.body as {
+      at?: string; activity?: 'Check In' | 'Check Out'; personName?: string; quantity?: number; ok?: boolean | null; note?: string; editedBy?: string;
+    };
+    const existing = await prisma.inventoryLog.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Log entry not found.' });
+    const log = await prisma.inventoryLog.update({
+      where: { id: req.params.id },
+      data: {
+        ...(at !== undefined ? { at } : {}),
+        ...(activity !== undefined ? { activity } : {}),
+        ...(personName !== undefined ? { personName } : {}),
+        ...(quantity !== undefined ? { quantity } : {}),
+        ...(ok !== undefined ? { ok } : {}),
+        ...(note !== undefined ? { note } : {}),
+        editedAt: nowIso(), editedBy: editedBy || 'Admin',
+      },
+    });
+    res.json({ ok: true, log: toInventoryLog(log) });
+  } catch (err) {
+    console.error('PATCH /api/inventory/logs/:id failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not update the log entry.' });
   }
 });
 

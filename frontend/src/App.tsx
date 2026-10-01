@@ -251,7 +251,7 @@ export default function App() {
   ));
 
   const assignInventoryQuantity = (itemId: string, collectorId: string, quantity: number) => withBusy(() => runAction(
-    () => api.assignInventoryQuantity(itemId, collectorId, quantity),
+    () => api.assignInventoryQuantity(itemId, collectorId, quantity, currentUser?.name || 'Admin'),
     ({ item }) => setInventory(prev => prev.map(i => (i.id === item.id ? item : i))),
     ({ item }) => `Assigned ${quantity} × "${item.name}" to ${users.find(u => u.id === collectorId)?.name || 'collector'}.`
   ));
@@ -450,6 +450,7 @@ export default function App() {
           <InventoryView
             inventory={inventory}
             dataCollectors={dataCollectors}
+            currentUserName={currentUser?.name || 'Admin'}
             onSave={saveInventoryItem}
             onAddBatch={addInventoryBatch}
             onDelete={deleteInventoryItem}

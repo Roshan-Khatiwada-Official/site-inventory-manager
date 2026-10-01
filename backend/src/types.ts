@@ -90,6 +90,23 @@ export interface InventoryItem {
   updatedAt: string;
 }
 
+export interface InventoryLog {
+  id: string;
+  itemId: string;
+  itemName: string;
+  itemCode: string;
+  activity: 'Check In' | 'Check Out';
+  personId: string;
+  personName: string;
+  quantity: number;
+  ok: boolean | null;
+  note: string;
+  at: string;
+  createdBy: string;
+  editedAt?: string;
+  editedBy?: string;
+}
+
 export interface CollectionSession {
   id: string;
   date: string;

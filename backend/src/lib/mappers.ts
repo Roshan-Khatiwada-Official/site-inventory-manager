@@ -8,6 +8,7 @@ import type {
   InventoryIssue as DbInventoryIssue,
   ResolvedIssue as DbResolvedIssue,
   ReturnRecord as DbReturnRecord,
+  InventoryLog as DbInventoryLog,
   Assignment as DbAssignment,
   CollectionSession as DbCollectionSession,
   SiteRequest as DbSiteRequest,
@@ -24,6 +25,7 @@ import type {
   InventoryHolder,
   InventoryIssue,
   InventoryItem,
+  InventoryLog,
   ResolvedIssue,
   ReturnRecord,
   Site,
@@ -121,6 +123,25 @@ export function toInventoryItem(i: InventoryItemWithChildren, nameById: Map<stri
     returnLog: i.returnLog.map(record),
     createdAt: i.createdAt,
     updatedAt: i.updatedAt,
+  };
+}
+
+export function toInventoryLog(l: DbInventoryLog): InventoryLog {
+  return {
+    id: l.id,
+    itemId: l.itemId,
+    itemName: l.itemName,
+    itemCode: l.itemCode,
+    activity: l.activity as InventoryLog['activity'],
+    personId: l.personId,
+    personName: l.personName,
+    quantity: l.quantity,
+    ok: l.ok,
+    note: l.note,
+    at: l.at,
+    createdBy: l.createdBy,
+    editedAt: l.editedAt ?? undefined,
+    editedBy: l.editedBy ?? undefined,
   };
 }
 
