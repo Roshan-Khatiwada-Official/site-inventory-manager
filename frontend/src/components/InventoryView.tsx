@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight, History, Download, Save } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight, History, Download, Save, CalendarRange } from 'lucide-react';
 import { InventoryItem, InventoryIssue, InventoryLog, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { heldQuantity, availableQuantity, issueQuantity, holderQuantity } from '../utils/inventory';
@@ -464,7 +464,8 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
-  const [activityFilter, setActivityFilter] = useState<'' | 'Check In' | 'Check Out'>('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [editingLog, setEditingLog] = useState<InventoryLog | null>(null);
 
   const load = () => {
@@ -473,11 +474,15 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   };
   useEffect(load, []);
 
+  // `at` is a UTC ISO timestamp, so its first 10 characters are already the
+  // GMT+0 calendar date — comparable directly against the date inputs.
   const filtered = logs.filter(l => {
     const t = q.toLowerCase();
     const matchesQ = !t || l.itemName.toLowerCase().includes(t) || l.itemCode.toLowerCase().includes(t) || l.personName.toLowerCase().includes(t);
-    const matchesActivity = !activityFilter || l.activity === activityFilter;
-    return matchesQ && matchesActivity;
+    const logDate = l.at.slice(0, 10);
+    const matchesFrom = !fromDate || logDate >= fromDate;
+    const matchesTo = !toDate || logDate <= toDate;
+    return matchesQ && matchesFrom && matchesTo;
   });
 
   const exportCsv = () => {
@@ -504,12 +509,22 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by item, ID or person…"
             className="pl-9 pr-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white w-64" />
         </div>
-        <select value={activityFilter} onChange={e => setActivityFilter(e.target.value as any)}
-          className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">Check-in and check-out</option>
-          <option value="Check Out">Check Out only</option>
-          <option value="Check In">Check In only</option>
-        </select>
+        <label className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50">
+          <CalendarRange className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span className="text-[11px] text-slate-500 font-medium">From</span>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="text-xs bg-transparent focus:outline-none" />
+        </label>
+        <label className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50">
+          <CalendarRange className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span className="text-[11px] text-slate-500 font-medium">To</span>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="text-xs bg-transparent focus:outline-none" />
+        </label>
+        {(fromDate || toDate) && (
+          <button onClick={() => { setFromDate(''); setToDate(''); }}
+            className="text-xs text-blue-600 hover:underline">Clear dates</button>
+        )}
         <span className="text-[11px] text-slate-400">{filtered.length} of {logs.length} entries · times shown in GMT+0</span>
         <button onClick={exportCsv} disabled={filtered.length === 0}
           className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm disabled:opacity-40">
