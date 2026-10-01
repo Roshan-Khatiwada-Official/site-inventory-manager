@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Package, PackageCheck, Search, AlertTriangle, ListPlus, UserPlus, Undo2, CheckCircle2, Wrench, PackageX, ShieldAlert, RotateCcw, ChevronRight } from 'lucide-react';
 import { InventoryItem, InventoryIssue, UserAccount } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { heldQuantity, availableQuantity, issueQuantity } from '../utils/inventory';
@@ -7,10 +7,10 @@ import { CheckInModal } from './CheckInModal';
 
 type IssueCondition = InventoryIssue['condition'];
 
-const CONDITION_STYLE: Record<IssueCondition, { label: string; badge: string; icon: React.ElementType }> = {
-  Flagged: { label: 'Flagged', badge: 'bg-amber-50 text-amber-700 border border-amber-200', icon: AlertTriangle },
-  Damaged: { label: 'Damaged', badge: 'bg-rose-50 text-rose-700 border border-rose-200', icon: Wrench },
-  Lost: { label: 'Lost', badge: 'bg-slate-100 text-slate-600 border border-slate-300', icon: PackageX },
+const CONDITION_STYLE: Record<IssueCondition, { label: string; badge: string; icon: React.ElementType; dot: string }> = {
+  Flagged: { label: 'Flagged', badge: 'bg-amber-50 text-amber-700 border border-amber-200', icon: AlertTriangle, dot: 'bg-amber-400' },
+  Damaged: { label: 'Damaged', badge: 'bg-rose-50 text-rose-700 border border-rose-200', icon: Wrench, dot: 'bg-rose-400' },
+  Lost: { label: 'Lost', badge: 'bg-slate-100 text-slate-600 border border-slate-300', icon: PackageX, dot: 'bg-slate-400' },
 };
 const ISSUE_CONDITIONS: IssueCondition[] = ['Flagged', 'Damaged', 'Lost'];
 
@@ -34,6 +34,24 @@ const StatCard: React.FC<{
     </div>
   </div>
 );
+
+// One clear status per row instead of a pile of badges — the drawer is
+// where the full breakdown (who holds what, every reported issue) lives.
+function itemStatus(i: InventoryItem): { label: string; badge: string; icon: React.ElementType | null } {
+  const held = heldQuantity(i);
+  const available = availableQuantity(i);
+  const reported = issueQuantity(i);
+  if (reported > 0) {
+    return { label: `${reported} need${reported === 1 ? 's' : ''} attention`, badge: 'bg-amber-50 text-amber-700 border border-amber-200', icon: AlertTriangle };
+  }
+  if (available === 0 && held > 0) {
+    return { label: 'Fully assigned', badge: 'bg-slate-100 text-slate-600 border border-slate-200', icon: null };
+  }
+  if (held > 0) {
+    return { label: `${available} in stock`, badge: 'bg-blue-50 text-blue-700 border border-blue-200', icon: null };
+  }
+  return { label: 'In stock', badge: 'bg-emerald-50 text-emerald-700 border border-emerald-200', icon: PackageCheck };
+}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -70,7 +88,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [assigning, setAssigning] = useState<InventoryItem | null>(null);
   const [checkingIn, setCheckingIn] = useState<CheckInTarget | null>(null);
-  const [managingIssues, setManagingIssues] = useState<InventoryItem | null>(null);
+  // The one place everything about a single item lives — holders, issues,
+  // and the quick actions on them — instead of scattered icon buttons and
+  // badges crammed into the table row. Tracked by id (not the object) so the
+  // drawer always reflects the latest state after an action inside it.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const viewingItem = useMemo(() => inventory.find(i => i.id === viewingId) || null, [inventory, viewingId]);
   const [q, setQ] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
@@ -238,20 +261,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <th className="px-4 py-3 font-semibold">Category</th>
                 <th className="px-4 py-3 font-semibold">Qty</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                <th className="px-4 py-3 font-semibold">Holders</th>
+                <th className="px-4 py-3 font-semibold w-10"><span className="sr-only">Open</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">
                   {hasFilters ? 'No items match your filters.' : 'No inventory items yet.'}
                 </td></tr>
               )}
               {filtered.map(i => {
-                const held = heldQuantity(i);
-                const available = availableQuantity(i);
+                const status = itemStatus(i);
+                const holderCount = i.holders.length;
                 return (
-                  <tr key={i.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={i.id} onClick={() => setViewingId(i.id)}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
@@ -260,7 +285,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 truncate">{i.name}</div>
                           <div className="font-mono text-[11px] text-slate-400">{i.itemId}</div>
-                          {i.note && <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{i.note}</div>}
                         </div>
                       </div>
                     </td>
@@ -271,63 +295,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </td>
                     <td className="px-4 py-3 text-slate-700 font-medium">{i.quantity || 0}</td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1">
-                        {available > 0 && (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            {available} in stock
-                          </span>
-                        )}
-                        {held > 0 && (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                            {held} assigned
-                          </span>
-                        )}
-                        {ISSUE_CONDITIONS.map(cond => {
-                          const qty = issueQuantity(i, cond);
-                          if (qty <= 0) return null;
-                          const style = CONDITION_STYLE[cond];
-                          return (
-                            <button key={cond} onClick={() => setManagingIssues(i)} title={`${style.label} — review or resolve`}
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${style.badge}`}>
-                              <style.icon className="w-3 h-3" /> {qty} {style.label.toLowerCase()}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {i.holders.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5">
-                          {i.holders.map(h => (
-                            <span key={h.collectorId} className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-full pl-2 pr-1 py-0.5">
-                              {h.collectorName || '—'}: {h.quantity}
-                              <button
-                                onClick={() => setCheckingIn({ item: i, collectorId: h.collectorId, collectorName: h.collectorName, quantity: h.quantity })}
-                                className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-white rounded-full" title={`Check in from ${h.collectorName}`}>
-                                <Undo2 className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${status.badge}`}>
+                        {status.icon && <status.icon className="w-3 h-3" />} {status.label}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button onClick={() => setManagingIssues(i)}
-                        className={`p-1.5 rounded-lg hover:bg-slate-100 ${i.issues.length > 0 ? 'text-amber-600 hover:text-amber-700' : 'text-slate-400 hover:text-blue-600'}`}
-                        title={i.issues.length > 0 ? 'Review reported issues' : 'Report damaged / lost / a problem'}>
-                        <ShieldAlert className="w-3.5 h-3.5" />
-                      </button>
-                      {available > 0 && dataCollectors.length > 0 && (
-                        <button onClick={() => setAssigning(i)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg" title="Assign to a field worker">
-                          <UserPlus className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button onClick={() => { setEditing(i); setOpen(true); }} title="Edit" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg">
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => onDelete(i.id)} disabled={held > 0}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg disabled:opacity-30"
-                        title={held > 0 ? 'Item is with a collector' : 'Delete'}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <td className="px-4 py-3 text-slate-500">
+                      {holderCount > 0 ? `${holderCount} ${holderCount === 1 ? 'person' : 'people'}` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
                     </td>
                   </tr>
                 );
@@ -390,12 +366,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           onConfirm={(qty, ok, note) => { onReturn(checkingIn.item.id, checkingIn.collectorId, qty, ok, note); setCheckingIn(null); }}
         />
       )}
-      {managingIssues && (
-        <IssuesModal
-          item={managingIssues}
-          onClose={() => setManagingIssues(null)}
-          onReport={(condition, qty, note, sourceCollectorId) => onReportIssue(managingIssues.id, condition, qty, note, sourceCollectorId)}
-          onResolve={(issueId, action) => onResolveIssue(managingIssues.id, issueId, action)}
+      {viewingItem && (
+        <ItemDrawer
+          item={viewingItem}
+          dataCollectors={dataCollectors}
+          onClose={() => setViewingId(null)}
+          onEdit={() => { setEditing(viewingItem); setOpen(true); setViewingId(null); }}
+          onDelete={() => { onDelete(viewingItem.id); setViewingId(null); }}
+          onAssign={() => setAssigning(viewingItem)}
+          onCheckIn={(collectorId, collectorName, quantity) => setCheckingIn({ item: viewingItem, collectorId, collectorName, quantity })}
+          onReport={(condition, qty, note, sourceCollectorId) => onReportIssue(viewingItem.id, condition, qty, note, sourceCollectorId)}
+          onResolve={(issueId, action) => onResolveIssue(viewingItem.id, issueId, action)}
         />
       )}
     </div>
@@ -403,59 +384,90 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 };
 
 /**
- * Report units as Flagged/Damaged/Lost (pulled from free stock or straight
- * out of a specific holder), and resolve issues already reported — clear
- * them back to stock, or turn a pending Flagged issue into a confirmed
- * Damaged/Lost outcome. Everything scoped to this one item; the rest of its
- * stock is untouched.
+ * Everything about one item in one place: a stock breakdown bar, who holds
+ * it (with a check-in action right there), every reported issue (with
+ * resolve actions), a form to report a new one, and the edit/assign/delete
+ * actions that used to be separate icon buttons crowding the table row.
  */
-const IssuesModal: React.FC<{
+const ItemDrawer: React.FC<{
   item: InventoryItem;
+  dataCollectors: UserAccount[];
   onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onAssign: () => void;
+  onCheckIn: (collectorId: string, collectorName: string, quantity: number) => void;
   onReport: (condition: IssueCondition, quantity: number, note: string, sourceCollectorId: string | null) => void;
   onResolve: (issueId: string, action: { type: 'clear' } | { type: 'reclassify'; condition: 'Damaged' | 'Lost'; note: string }) => void;
-}> = ({ item, onClose, onReport, onResolve }) => {
+}> = ({ item, dataCollectors, onClose, onEdit, onDelete, onAssign, onCheckIn, onReport, onResolve }) => {
+  const held = heldQuantity(item);
   const available = availableQuantity(item);
-  const sources = [
-    ...(available > 0 ? [{ key: 'stock', label: `From stock (${available} available)`, max: available }] : []),
-    ...item.holders.map(h => ({ key: h.collectorId, label: `From ${h.collectorName} (${h.quantity})`, max: h.quantity })),
-  ];
+  const [reportOpen, setReportOpen] = useState(false);
 
-  const [condition, setCondition] = useState<IssueCondition>('Flagged');
-  const [source, setSource] = useState(sources[0]?.key || '');
-  const [quantity, setQuantity] = useState(1);
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const selected = sources.find(s => s.key === source);
-
-  const submitReport = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!selected) { setError('Nothing available to report.'); return; }
-    if (quantity <= 0 || quantity > selected.max) { setError(`Quantity must be between 1 and ${selected.max}.`); return; }
-    if (!note.trim()) { setError('Add a short note on what happened.'); return; }
-    onReport(condition, quantity, note, selected.key === 'stock' ? null : selected.key);
-    setNote(''); setQuantity(1);
-  };
-
-  const field = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none';
+  const segments: { qty: number; color: string }[] = [
+    { qty: available, color: 'bg-emerald-400' },
+    { qty: held, color: 'bg-blue-400' },
+    { qty: issueQuantity(item, 'Flagged'), color: 'bg-amber-400' },
+    { qty: issueQuantity(item, 'Damaged'), color: 'bg-rose-400' },
+    { qty: issueQuantity(item, 'Lost'), color: 'bg-slate-400' },
+  ].filter(s => s.qty > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm sm:p-4">
-      <div className="bg-white sm:rounded-2xl w-full sm:max-w-lg h-full sm:h-auto sm:max-h-[90vh] border border-slate-200 shadow-xl flex flex-col">
-        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><ShieldAlert className="w-4 h-4" /></div>
-            <div>
-              <h3 className="font-bold text-slate-900 text-base">Flagged / Damaged / Lost</h3>
-              <p className="text-[11px] text-slate-500">{item.name} · {item.itemId} · {item.quantity} total</p>
-            </div>
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-[1px]" onClick={onClose}>
+      <div className="w-full sm:max-w-md h-full bg-white shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div className="min-w-0">
+            <h3 className="font-bold text-slate-900 text-base truncate">{item.name}</h3>
+            <p className="text-[11px] text-slate-500 font-mono">{item.itemId}{item.category && ` · ${item.category}`}</p>
           </div>
-          <button onClick={onClose} title="Close" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} title="Close" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 shrink-0"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5 text-xs text-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-6 text-xs text-slate-700">
+          {/* Stock breakdown */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-semibold text-slate-800">{item.quantity} total</span>
+              <span className="text-[11px] text-slate-400">updated {formatDateTime(item.updatedAt)}</span>
+            </div>
+            {segments.length > 0 && (
+              <div className="h-2.5 rounded-full overflow-hidden bg-slate-100 flex">
+                {segments.map((s, idx) => (
+                  <div key={idx} className={s.color} style={{ width: `${(s.qty / item.quantity) * 100}%` }} />
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-slate-500">
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> {available} in stock</span>
+              {held > 0 && <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> {held} assigned</span>}
+              {ISSUE_CONDITIONS.map(c => {
+                const qty = issueQuantity(item, c);
+                if (qty <= 0) return null;
+                return <span key={c} className="inline-flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${CONDITION_STYLE[c].dot}`} /> {qty} {c.toLowerCase()}</span>;
+              })}
+            </div>
+            {item.note && <p className="mt-2 text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">{item.note}</p>}
+          </div>
+
+          {/* Holders */}
+          {item.holders.length > 0 && (
+            <div>
+              <label className="font-semibold mb-1.5 block">Held by ({item.holders.length})</label>
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                {item.holders.map(h => (
+                  <div key={h.collectorId} className="px-3 py-2 flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-800">{h.collectorName || '—'} <span className="font-normal text-slate-400">· {h.quantity}</span></span>
+                    <button type="button" onClick={() => onCheckIn(h.collectorId, h.collectorName, h.quantity)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-lg">
+                      <Undo2 className="w-3.5 h-3.5" /> Check in
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Reported issues */}
           {item.issues.length > 0 && (
             <div>
               <label className="font-semibold mb-1.5 block">Reported ({item.issues.length})</label>
@@ -495,50 +507,109 @@ const IssuesModal: React.FC<{
             </div>
           )}
 
-          <form onSubmit={submitReport} className="space-y-3 pt-1 border-t border-slate-100">
-            <label className="font-semibold block pt-3">Report new</label>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold mb-1 text-[11px] text-slate-500">Type</label>
-                <select value={condition} onChange={e => setCondition(e.target.value as IssueCondition)} className={`${field} bg-white`}>
-                  {ISSUE_CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_STYLE[c].label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block font-semibold mb-1 text-[11px] text-slate-500">Quantity</label>
-                <input type="number" min={1} max={selected?.max || 1} value={quantity}
-                  onChange={e => setQuantity(parseInt(e.target.value) || 0)} className={field} disabled={!selected} />
-              </div>
-            </div>
-            {sources.length > 0 ? (
-              <div>
-                <label className="block font-semibold mb-1 text-[11px] text-slate-500">Source</label>
-                <select value={source} onChange={e => setSource(e.target.value)} className={`${field} bg-white`}>
-                  {sources.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                </select>
-              </div>
+          {/* Report new issue — collapsed by default to keep the drawer calm */}
+          <div>
+            {!reportOpen ? (
+              <button type="button" onClick={() => setReportOpen(true)}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-dashed border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 rounded-lg text-[11px] font-semibold">
+                <ShieldAlert className="w-3.5 h-3.5" /> Report flagged / damaged / lost
+              </button>
             ) : (
-              <p className="text-slate-400">Nothing left to report — the whole item is already accounted for.</p>
+              <ReportIssueForm item={item} onCancel={() => setReportOpen(false)} onReport={(c, q, n, s) => { onReport(c, q, n, s); setReportOpen(false); }} />
             )}
-            <div>
-              <label className="block font-semibold mb-1 text-[11px] text-slate-500">Note *</label>
-              <textarea rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="What happened?" className={field} />
-            </div>
-
-            {error && <p className="text-rose-600 text-[11px] font-medium">{error}</p>}
-
-            <button type="submit" disabled={!selected}
-              className="w-full px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white rounded-lg shadow-sm">
-              Report
-            </button>
-          </form>
+          </div>
         </div>
 
-        <div className="shrink-0 px-6 pt-3 pb-4 bg-white border-t border-slate-200 flex justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200">Close</button>
+        {/* Footer actions */}
+        <div className="shrink-0 border-t border-slate-200 p-4 flex flex-wrap gap-2">
+          {available > 0 && dataCollectors.length > 0 && (
+            <button onClick={onAssign}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+              <UserPlus className="w-4 h-4" /> Assign
+            </button>
+          )}
+          <button onClick={onEdit}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg">
+            <Pencil className="w-4 h-4" /> Edit
+          </button>
+          <button onClick={onDelete} disabled={held > 0} title={held > 0 ? 'Item is with a collector' : 'Delete'}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-300 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-600 text-slate-500 text-xs font-semibold rounded-lg disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-slate-300 disabled:hover:text-slate-500">
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
+  );
+};
+
+/** Inline form (used inside ItemDrawer) to report some units as Flagged/Damaged/Lost. */
+const ReportIssueForm: React.FC<{
+  item: InventoryItem;
+  onCancel: () => void;
+  onReport: (condition: IssueCondition, quantity: number, note: string, sourceCollectorId: string | null) => void;
+}> = ({ item, onCancel, onReport }) => {
+  const available = availableQuantity(item);
+  const sources = [
+    ...(available > 0 ? [{ key: 'stock', label: `From stock (${available} available)`, max: available }] : []),
+    ...item.holders.map(h => ({ key: h.collectorId, label: `From ${h.collectorName} (${h.quantity})`, max: h.quantity })),
+  ];
+
+  const [condition, setCondition] = useState<IssueCondition>('Flagged');
+  const [source, setSource] = useState(sources[0]?.key || '');
+  const [quantity, setQuantity] = useState(1);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const selected = sources.find(s => s.key === source);
+  const field = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none';
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!selected) { setError('Nothing available to report.'); return; }
+    if (quantity <= 0 || quantity > selected.max) { setError(`Quantity must be between 1 and ${selected.max}.`); return; }
+    if (!note.trim()) { setError('Add a short note on what happened.'); return; }
+    onReport(condition, quantity, note, selected.key === 'stock' ? null : selected.key);
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-2.5 bg-amber-50/50 border border-amber-200 rounded-lg p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block font-semibold mb-1 text-[11px] text-slate-500">Type</label>
+          <select value={condition} onChange={e => setCondition(e.target.value as IssueCondition)} className={`${field} bg-white`}>
+            {ISSUE_CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_STYLE[c].label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block font-semibold mb-1 text-[11px] text-slate-500">Quantity</label>
+          <input type="number" min={1} max={selected?.max || 1} value={quantity}
+            onChange={e => setQuantity(parseInt(e.target.value) || 0)} className={field} disabled={!selected} />
+        </div>
+      </div>
+      {sources.length > 0 ? (
+        <div>
+          <label className="block font-semibold mb-1 text-[11px] text-slate-500">Source</label>
+          <select value={source} onChange={e => setSource(e.target.value)} className={`${field} bg-white`}>
+            {sources.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+      ) : (
+        <p className="text-slate-400">Nothing left to report — the whole item is already accounted for.</p>
+      )}
+      <div>
+        <label className="block font-semibold mb-1 text-[11px] text-slate-500">Note *</label>
+        <textarea rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="What happened?" className={field} />
+      </div>
+      {error && <p className="text-rose-600 text-[11px] font-medium">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white rounded-lg border border-slate-200">Cancel</button>
+        <button type="submit" disabled={!selected}
+          className="flex-1 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white rounded-lg">
+          Report
+        </button>
+      </div>
+    </form>
   );
 };
 
@@ -566,7 +637,7 @@ const AssignModal: React.FC<{
   const field = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm sm:p-4">
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm sm:p-4">
       <div className="bg-white sm:rounded-2xl w-full sm:max-w-sm h-full sm:h-auto border border-slate-200 shadow-xl flex flex-col">
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2.5">
