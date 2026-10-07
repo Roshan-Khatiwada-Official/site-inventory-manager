@@ -445,7 +445,7 @@ function formatLogDate(iso: string): string {
 function formatLogTime(iso: string): string {
   const d = new Date(iso);
   if (!iso || isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' });
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC' });
 }
 function toDatetimeLocalUtc(iso: string): string {
   const d = new Date(iso);
