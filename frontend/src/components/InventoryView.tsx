@@ -434,26 +434,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   );
 };
 
-// All timestamps are stored as UTC (GMT+0) ISO strings — displayed in that
-// same zone everywhere here, rather than silently shifting to the viewer's
-// local time, so the log stays consistent no matter who's reading it.
+// Timestamps are stored as UTC ISO strings, but displayed in Nepal time
+// (Asia/Kathmandu, UTC+5:45) everywhere here — otherwise a check-in that
+// actually happened in the afternoon in Nepal could show as "AM", which is
+// exactly backwards for everyone actually reading this log.
+const NEPAL_TZ = 'Asia/Kathmandu';
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000; // UTC+5:45
+
 function formatLogDate(iso: string): string {
   const d = new Date(iso);
   if (!iso || isNaN(d.getTime())) return iso || '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' });
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', timeZone: NEPAL_TZ });
 }
 function formatLogTime(iso: string): string {
   const d = new Date(iso);
   if (!iso || isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC' });
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: NEPAL_TZ });
 }
+function toNepalDateStr(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return '';
+  // en-CA gives YYYY-MM-DD directly, already in Nepal time.
+  return d.toLocaleDateString('en-CA', { timeZone: NEPAL_TZ });
+}
+// `datetime-local` inputs have no timezone of their own — they just show
+// whatever numbers they're given. So to let the admin type/see Nepal wall
+// clock time, shift the UTC instant forward by the Nepal offset before
+// slicing it into the input's naive "YYYY-MM-DDTHH:mm:ss" format, and shift
+// back the same amount when reading the value back out.
 function toDatetimeLocalUtc(iso: string): string {
   const d = new Date(iso);
   if (!iso || isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 19);
+  return new Date(d.getTime() + NEPAL_OFFSET_MS).toISOString().slice(0, 19);
 }
 function fromDatetimeLocalUtc(value: string): string {
-  return value.length === 16 ? `${value}:00Z` : `${value}Z`;
+  const naive = new Date(`${value.length === 16 ? `${value}:00` : value}Z`);
+  const utc = new Date(naive.getTime() - NEPAL_OFFSET_MS);
+  return utc.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 function csvCell(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
@@ -474,12 +491,12 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   };
   useEffect(load, []);
 
-  // `at` is a UTC ISO timestamp, so its first 10 characters are already the
-  // GMT+0 calendar date — comparable directly against the date inputs.
+  // Match the From/To date pickers against the Nepal calendar date, not the
+  // raw UTC date — otherwise entries near midnight land on the "wrong" day.
   const filtered = logs.filter(l => {
     const t = q.toLowerCase();
     const matchesQ = !t || l.itemName.toLowerCase().includes(t) || l.itemCode.toLowerCase().includes(t) || l.personName.toLowerCase().includes(t);
-    const logDate = l.at.slice(0, 10);
+    const logDate = toNepalDateStr(l.at);
     const matchesFrom = !fromDate || logDate >= fromDate;
     const matchesTo = !toDate || logDate <= toDate;
     return matchesQ && matchesFrom && matchesTo;
@@ -558,7 +575,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
           <button onClick={() => { setFromDate(''); setToDate(''); }}
             className="text-xs text-blue-600 hover:underline">Clear dates</button>
         )}
-        <span className="text-[11px] text-slate-400">{filtered.length} of {logs.length} entries · times shown in GMT+0</span>
+        <span className="text-[11px] text-slate-400">{filtered.length} of {logs.length} entries · times shown in Nepal time (NPT)</span>
         <button onClick={exportCsv} disabled={filtered.length === 0}
           className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm disabled:opacity-40">
           <Download className="w-4 h-4" /> Export CSV
@@ -573,7 +590,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                 <th className={th}>Date</th>
                 <th className={th}>Item</th>
                 <th className={th}>ID</th>
-                <th className={th}>Time (GMT+0)</th>
+                <th className={th}>Time (NPT)</th>
                 <th className={th}>Activity</th>
                 <th className={th}>Person</th>
                 <th className={th}>Qty</th>
@@ -704,10 +721,10 @@ const LogEditModal: React.FC<{
           </div>
 
           <div>
-            <label className="block font-semibold mb-1">Date &amp; time (GMT+0) *</label>
+            <label className="block font-semibold mb-1">Date &amp; time (Nepal time) *</label>
             <input type="datetime-local" step={1} value={at} onChange={e => setAt(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-            <p className="mt-1 text-[10px] text-slate-400">Entered and stored as GMT+0, precise to the second.</p>
+            <p className="mt-1 text-[10px] text-slate-400">Entered in Nepal time, stored precise to the second.</p>
           </div>
 
           {activity === 'Check In' && (
