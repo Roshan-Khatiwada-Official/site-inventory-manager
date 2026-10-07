@@ -447,11 +447,6 @@ function formatLogTime(iso: string): string {
   if (!iso || isNaN(d.getTime())) return '';
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC' });
 }
-function toNepalDateStr(iso: string): string {
-  const d = new Date(iso);
-  if (!iso || isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
 function toDatetimeLocalUtc(iso: string): string {
   const d = new Date(iso);
   if (!iso || isNaN(d.getTime())) return '';
@@ -479,12 +474,12 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   };
   useEffect(load, []);
 
-  // Match the From/To date pickers against the Nepal calendar date, not the
-  // raw UTC date — otherwise entries near midnight land on the "wrong" day.
+  // `at` is a UTC ISO timestamp, so its first 10 characters are already the
+  // GMT+0 calendar date — comparable directly against the date inputs.
   const filtered = logs.filter(l => {
     const t = q.toLowerCase();
     const matchesQ = !t || l.itemName.toLowerCase().includes(t) || l.itemCode.toLowerCase().includes(t) || l.personName.toLowerCase().includes(t);
-    const logDate = toNepalDateStr(l.at);
+    const logDate = l.at.slice(0, 10);
     const matchesFrom = !fromDate || logDate >= fromDate;
     const matchesTo = !toDate || logDate <= toDate;
     return matchesQ && matchesFrom && matchesTo;
