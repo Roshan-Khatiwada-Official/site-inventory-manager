@@ -1,12 +1,23 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Clock, MapPin, Package, CheckCircle2, Briefcase, Camera, Plus, X } from 'lucide-react';
-import { Assignment, Site, InventoryItem, CollectionSession } from '../types';
+import { Assignment, Site, InventoryItem, CollectionSession, InventoryLog } from '../types';
 import { todayStr, byNewest } from '../utils/storage';
 import { TASKS_BY_CATEGORY } from '../taskMasterlist';
+
+// A camera the worker actually had on loan on some day, derived from the
+// Check Out/Check In history log rather than current possession — so a
+// camera they've since returned still shows up for the day(s) they used it.
+interface LoggedCamera {
+  id: string;       // InventoryItem id
+  itemId: string;   // human-readable camera code
+  name: string;
+}
+
 interface MyWorkViewProps {
   assignments: Assignment[];
   sites: Site[];
   myKit: InventoryItem[];
+  myLogs: InventoryLog[];
   onSubmitHours: (assignmentId: string, sessions: Omit<CollectionSession, 'id'>[]) => void;
   onFinish: (assignmentId: string, sessions: Omit<CollectionSession, 'id'>[]) => void;
   onReopen: (assignmentId: string) => void;
@@ -14,7 +25,7 @@ interface MyWorkViewProps {
   onDeleteSession: (assignmentId: string, sessionId: string) => void;
 }
 
-export const MyWorkView: React.FC<MyWorkViewProps> = ({ assignments, sites, myKit, onSubmitHours, onFinish, onReopen, onUpdateSession, onDeleteSession }) => {
+export const MyWorkView: React.FC<MyWorkViewProps> = ({ assignments, sites, myKit, myLogs, onSubmitHours, onFinish, onReopen, onUpdateSession, onDeleteSession }) => {
   return (
     <div className="space-y-4">
       <div>
@@ -52,7 +63,7 @@ export const MyWorkView: React.FC<MyWorkViewProps> = ({ assignments, sites, myKi
             key={a.id}
             a={a}
             site={sites.find(s => s.id === a.siteId)}
-            myKit={myKit}
+            myLogs={myLogs}
             onSubmitHours={onSubmitHours}
             onFinish={onFinish}
             onReopen={onReopen}
@@ -73,18 +84,72 @@ interface TaskRow {
 const AssignmentCard: React.FC<{
   a: Assignment;
   site?: Site;
-  myKit: InventoryItem[];
+  myLogs: InventoryLog[];
   onSubmitHours: (id: string, sessions: Omit<CollectionSession, 'id'>[]) => void;
   onFinish: (id: string, sessions: Omit<CollectionSession, 'id'>[]) => void;
   onReopen: (id: string) => void;
   onUpdateSession: (assignmentId: string, sessionId: string, updates: Partial<Pick<CollectionSession, 'date' | 'hours' | 'task' | 'cameraId' | 'cameraName' | 'cameraItemId'>>) => void;
   onDeleteSession: (assignmentId: string, sessionId: string) => void;
-}> = ({ a, site, myKit, onSubmitHours, onFinish, onReopen, onUpdateSession, onDeleteSession }) => {
+}> = ({ a, site, myLogs, onSubmitHours, onFinish, onReopen, onUpdateSession, onDeleteSession }) => {
   const [date, setDate] = useState(todayStr());
   const [selectedCameraIds, setSelectedCameraIds] = useState<string[]>([]);
   const [rowsByCamera, setRowsByCamera] = useState<Record<string, TaskRow[]>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{ date: string; hours: string; task: string; cameraId: string }>({ date: '', hours: '', task: '', cameraId: '' });
+
+  // Build one loan interval per Check Out → (next) Check In pair, per camera,
+  // from this worker's own history log. A camera with no matching Check In
+  // yet is still "out" — its interval stays open through today. This is what
+  // lets a worker pick, say, yesterday's date and still see a camera they've
+  // since checked back in, while today shows nothing if nothing was taken out today.
+  const loanIntervals = useMemo(() => {
+    const byItem = new Map<string, InventoryLog[]>();
+    myLogs.forEach(l => {
+      const arr = byItem.get(l.itemId) || [];
+      arr.push(l);
+      byItem.set(l.itemId, arr);
+    });
+    const intervals: { itemId: string; itemCode: string; name: string; start: string; end: string | null }[] = [];
+    byItem.forEach((logs, itemId) => {
+      const sorted = [...logs].sort((x, y) => x.at.localeCompare(y.at));
+      let open: { itemId: string; itemCode: string; name: string; start: string; end: string | null } | null = null;
+      sorted.forEach(l => {
+        if (l.activity === 'Check Out') {
+          open = { itemId, itemCode: l.itemCode, name: l.itemName, start: l.at.slice(0, 10), end: null };
+        } else if (l.activity === 'Check In' && open) {
+          open.end = l.at.slice(0, 10);
+          intervals.push(open);
+          open = null;
+        }
+      });
+      if (open) intervals.push(open);
+    });
+    return intervals;
+  }, [myLogs]);
+
+  const camerasUsedOn = (d: string): LoggedCamera[] => {
+    const seen = new Map<string, LoggedCamera>();
+    loanIntervals.forEach(iv => {
+      if (d >= iv.start && (iv.end === null || d <= iv.end)) {
+        seen.set(iv.itemId, { id: iv.itemId, itemId: iv.itemCode, name: iv.name });
+      }
+    });
+    return Array.from(seen.values());
+  };
+  const findLoggedCamera = (id: string): LoggedCamera | undefined => {
+    const iv = loanIntervals.find(x => x.itemId === id);
+    return iv ? { id: iv.itemId, itemId: iv.itemCode, name: iv.name } : undefined;
+  };
+
+  const camerasForDate = useMemo(() => camerasUsedOn(date), [loanIntervals, date]);
+
+  // The camera list depends on the date — if the worker changes it, clear a
+  // half-filled selection rather than leaving stale picks that no longer apply.
+  useEffect(() => {
+    setSelectedCameraIds([]);
+    setRowsByCamera({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
 
   const startEdit = (s: CollectionSession) => {
     setEditingSessionId(s.id);
@@ -95,7 +160,7 @@ const AssignmentCard: React.FC<{
     if (!editingSessionId) return;
     const h = parseFloat(editDraft.hours);
     if (!h || h <= 0) { window.alert('Enter valid hours.'); return; }
-    const cam = myKit.find(i => i.id === editDraft.cameraId);
+    const cam = findLoggedCamera(editDraft.cameraId);
     onUpdateSession(assignmentId, editingSessionId, {
       date: editDraft.date, hours: h, task: editDraft.task.trim() || undefined,
       cameraId: cam?.id, cameraName: cam?.name, cameraItemId: cam?.itemId,
@@ -105,7 +170,7 @@ const AssignmentCard: React.FC<{
   // Only the tasks belonging to this site's own field/category — not the whole masterlist.
   const siteTasks = site ? TASKS_BY_CATEGORY[site.category] || [] : [];
 
-  const toggleCamera = (cam: InventoryItem) => {
+  const toggleCamera = (cam: LoggedCamera) => {
     setSelectedCameraIds(prev => {
       if (prev.includes(cam.id)) {
         setRowsByCamera(r => { const next = { ...r }; delete next[cam.id]; return next; });
@@ -136,7 +201,7 @@ const AssignmentCard: React.FC<{
   const buildSessions = (): Omit<CollectionSession, 'id'>[] => {
     const sessions: Omit<CollectionSession, 'id'>[] = [];
     selectedCameraIds.forEach(camId => {
-      const cam = myKit.find(i => i.id === camId);
+      const cam = findLoggedCamera(camId);
       (rowsByCamera[camId] || []).forEach(row => {
         const h = parseFloat(row.hours);
         if (h && h > 0) {
@@ -204,7 +269,12 @@ const AssignmentCard: React.FC<{
                     <select value={editDraft.cameraId} onChange={e => setEditDraft(d => ({ ...d, cameraId: e.target.value }))}
                       className="px-1.5 py-1 border border-slate-300 rounded bg-white">
                       <option value="">—</option>
-                      {myKit.map(cam => <option key={cam.id} value={cam.id}>{cam.itemId}</option>)}
+                      {(() => {
+                        const options = camerasUsedOn(editDraft.date);
+                        const current = findLoggedCamera(editDraft.cameraId);
+                        if (current && !options.some(o => o.id === current.id)) options.push(current);
+                        return options.map(cam => <option key={cam.id} value={cam.id}>{cam.itemId}</option>);
+                      })()}
                     </select>
                   </div>
                   <div className="flex-1 min-w-[140px]">
@@ -258,11 +328,15 @@ const AssignmentCard: React.FC<{
 
           <div>
             <label className="block font-semibold text-slate-600 mb-1 flex items-center gap-1"><Camera className="w-3.5 h-3.5" /> Camera(s) used</label>
-            {myKit.length === 0 ? (
-              <p className="text-slate-400">No camera equipment assigned to you yet — ask the admin.</p>
+            {camerasForDate.length === 0 ? (
+              <p className="text-slate-400">
+                {date === todayStr()
+                  ? "No camera checked out to you today yet — ask the admin, or pick a different date."
+                  : "No camera was checked out to you on this date."}
+              </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {myKit.map(cam => (
+                {camerasForDate.map(cam => (
                   <button key={cam.id} type="button" onClick={() => toggleCamera(cam)}
                     className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium ${
                       selectedCameraIds.includes(cam.id)
@@ -277,7 +351,7 @@ const AssignmentCard: React.FC<{
           </div>
 
           {selectedCameraIds.map(camId => {
-            const cam = myKit.find(i => i.id === camId);
+            const cam = findLoggedCamera(camId);
             const rows = rowsByCamera[camId] || [];
             return (
               <div key={camId} className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">

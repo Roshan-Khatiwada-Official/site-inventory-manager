@@ -7,6 +7,7 @@ import {
   SiteRequest,
   UserAccount,
   CollectionSession,
+  InventoryLog,
   CAN_FIND_SITES,
   CAN_COLLECT,
 } from './types';
@@ -37,6 +38,7 @@ export default function App() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [requests, setRequests] = useState<SiteRequest[]>([]);
   const [users, setUsers] = useState<UserAccount[]>([]);
+  const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
 
@@ -79,12 +81,13 @@ export default function App() {
   const busyRef = useRef(false); // an action is in flight — skip the poll so it can't clobber it
   const loadAll = async (opts?: { silent?: boolean }) => {
     try {
-      const { data } = await api.getAllData();
+      const [{ data }, { logs }] = await Promise.all([api.getAllData(), api.getInventoryLogs()]);
       setSites(data.sites);
       setInventory(data.inventory);
       setAssignments(data.assignments);
       setRequests(data.requests);
       setUsers(data.users);
+      setInventoryLogs(logs);
       setCurrentUser(prev => (prev ? data.users.find(u => u.id === prev.id) || null : null));
       setInitialLoadError(null);
       return true;
@@ -390,6 +393,7 @@ export default function App() {
   const canCollect = currentUser ? CAN_COLLECT.includes(currentUser.role) : false;
   const itemsOutCount = useMemo(() => inventory.filter(i => i.holders.length > 0).length, [inventory]);
   const myKit = useMemo(() => (currentUser ? inventory.filter(i => i.holders.some(h => h.collectorId === currentUser.id)) : []), [inventory, currentUser]);
+  const myLogs = useMemo(() => (currentUser ? inventoryLogs.filter(l => l.personId === currentUser.id) : []), [inventoryLogs, currentUser]);
 
   const toastEl = toast && (
     <div className={`fixed bottom-5 right-5 z-[60] text-white px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3 text-xs ${
@@ -518,6 +522,7 @@ export default function App() {
             assignments={myAssignments}
             sites={sites}
             myKit={myKit}
+            myLogs={myLogs}
             onSubmitHours={submitHours}
             onFinish={finishAssignment}
             onReopen={reopenAssignment}
