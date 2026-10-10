@@ -4,6 +4,18 @@ import { Assignment, Site, InventoryItem, CollectionSession, InventoryLog } from
 import { todayStr, byNewest } from '../utils/storage';
 import { TASKS_BY_CATEGORY } from '../taskMasterlist';
 
+// Logs are stored/displayed in raw GMT+0 everywhere else in the app (admin's
+// Inventory History tab, the database) — that stays untouched. But the date
+// picker here (`todayStr()`) uses the worker's own device-local calendar date
+// (Nepal, UTC+5:45), so a Check Out logged just after UTC midnight is still
+// "this morning" locally. Convert at the point of comparison only, so a
+// worker picking "today" sees today in their own calendar, not GMT's.
+const NEPAL_OFFSET_MINUTES = 5 * 60 + 45;
+function localDateStr(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + NEPAL_OFFSET_MINUTES * 60000);
+  return d.toISOString().slice(0, 10);
+}
+
 // A camera the worker actually had on loan on some day, derived from the
 // Check Out/Check In history log rather than current possession — so a
 // camera they've since returned still shows up for the day(s) they used it.
@@ -115,9 +127,9 @@ const AssignmentCard: React.FC<{
       let open: { itemId: string; itemCode: string; name: string; start: string; end: string | null } | null = null;
       sorted.forEach(l => {
         if (l.activity === 'Check Out') {
-          open = { itemId, itemCode: l.itemCode, name: l.itemName, start: l.at.slice(0, 10), end: null };
+          open = { itemId, itemCode: l.itemCode, name: l.itemName, start: localDateStr(l.at), end: null };
         } else if (l.activity === 'Check In' && open) {
-          open.end = l.at.slice(0, 10);
+          open.end = localDateStr(l.at);
           intervals.push(open);
           open = null;
         }
