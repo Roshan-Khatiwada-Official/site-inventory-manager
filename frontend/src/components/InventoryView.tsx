@@ -4,7 +4,7 @@ import { InventoryItem, InventoryIssue, InventoryLog, UserAccount } from '../typ
 import { todayStr, byNewest } from '../utils/storage';
 import { heldQuantity, availableQuantity, issueQuantity, holderQuantity } from '../utils/inventory';
 import { CheckInModal } from './CheckInModal';
-import { getInventoryLogs, updateInventoryLog } from '../services/api';
+import { getInventoryLogs, updateInventoryLog, deleteInventoryLog } from '../services/api';
 
 type IssueCondition = InventoryIssue['condition'];
 
@@ -467,6 +467,20 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [editingLog, setEditingLog] = useState<InventoryLog | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const removeLog = async (l: InventoryLog) => {
+    if (!window.confirm(`Delete this ${l.activity} entry for ${l.personName} (${l.itemCode})? This cannot be undone.`)) return;
+    setDeletingId(l.id);
+    try {
+      await deleteInventoryLog(l.id);
+      setLogs(prev => prev.filter(x => x.id !== l.id));
+    } catch {
+      window.alert('Could not delete this entry.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const load = () => {
     setLoading(true);
@@ -579,7 +593,7 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                 <th className={th}>Qty</th>
                 <th className={th}>Logged By</th>
                 <th className={th}>Note</th>
-                <th className={`${th} w-10`}><span className="sr-only">Edit</span></th>
+                <th className={`${th} w-16`}><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -605,10 +619,14 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
                     {l.ok === false ? (l.note || 'Flagged') : (l.note || '—')}
                     {l.editedAt && <span className="text-slate-300"> · edited</span>}
                   </td>
-                  <td className={`${td} text-right`}>
+                  <td className={`${td} text-right whitespace-nowrap`}>
                     <button onClick={() => setEditingLog(l)} title="Edit this entry"
                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md">
                       <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => removeLog(l)} disabled={deletingId === l.id} title="Delete this entry"
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md disabled:opacity-40">
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
                 </tr>

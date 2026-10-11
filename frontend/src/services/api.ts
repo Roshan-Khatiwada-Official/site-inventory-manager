@@ -90,6 +90,7 @@ export const updateInventoryLog = (
   changes: Partial<Pick<InventoryLog, 'at' | 'activity' | 'personName' | 'quantity' | 'ok' | 'note' | 'createdBy'>>,
   editedBy: string
 ) => patch<{ log: InventoryLog }>(`/api/inventory/logs/${id}`, { ...changes, editedBy });
+export const deleteInventoryLog = (id: string) => del<{}>(`/api/inventory/logs/${id}`);
 
 // ---- assignments ----
 export const saveAssignment = (assignment: Assignment, assignedById: string, assignedByName: string) =>
