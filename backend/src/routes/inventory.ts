@@ -191,6 +191,46 @@ inventoryRouter.get('/logs', async (_req, res) => {
   }
 });
 
+// An admin manually adding a log entry after the fact — e.g. backfilling a
+// Check Out that was missed because the item was assigned from a different
+// screen that doesn't write to history. Does not touch holders/stock.
+inventoryRouter.post('/logs', async (req, res) => {
+  try {
+    const { itemId, itemName, itemCode, activity, personId, personName, quantity, ok, note, at, createdBy } = req.body as {
+      itemId: string; itemName: string; itemCode: string; activity: 'Check In' | 'Check Out';
+      personId: string; personName: string; quantity: number; ok?: boolean | null; note?: string; at: string; createdBy?: string;
+    };
+    if (!itemId || !activity || !personId || !at || !(quantity > 0)) {
+      return res.status(400).json({ ok: false, error: 'itemId, activity, personId, at and a positive quantity are required.' });
+    }
+    const log = await prisma.inventoryLog.create({
+      data: {
+        itemId, itemName: itemName || '', itemCode: itemCode || '', activity,
+        personId, personName: personName || '', quantity, ok: ok ?? null, note: note || '',
+        at, createdBy: createdBy || 'Admin',
+      },
+    });
+    res.json({ ok: true, log: toInventoryLog(log) });
+  } catch (err) {
+    console.error('POST /api/inventory/logs failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not create the log entry.' });
+  }
+});
+
+// An admin removing a bad/leftover log entry (e.g. test data, or a mistaken
+// backfill). Does not touch holders/stock — the log is purely a history record.
+inventoryRouter.delete('/logs/:id', async (req, res) => {
+  try {
+    const existing = await prisma.inventoryLog.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Log entry not found.' });
+    await prisma.inventoryLog.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/inventory/logs/:id failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not delete the log entry.' });
+  }
+});
+
 // An admin correcting a log entry after the fact (wrong time, wrong person,
 // typo in the note, etc.) — this only edits the log row itself, it does not
 // replay/undo the stock movement that already happened.
