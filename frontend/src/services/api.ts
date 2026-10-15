@@ -119,5 +119,5 @@ export const decideRequest = (id: string, approve: boolean, assignedById: string
 // ---- users ----
 export const saveUser = (user: UserAccount) => post<{ user: UserAccount }>('/api/users', user);
 export const deleteUser = (id: string) => del<{}>(`/api/users/${id}`);
-export const setCollectorKit = (collectorId: string, picks: { itemId: string; quantity: number }[]) =>
-  post<{ inventory: InventoryItem[] }>(`/api/users/${collectorId}/kit`, { picks });
+export const setCollectorKit = (collectorId: string, picks: { itemId: string; quantity: number }[], byName: string) =>
+  post<{ inventory: InventoryItem[] }>(`/api/users/${collectorId}/kit`, { picks, byName });

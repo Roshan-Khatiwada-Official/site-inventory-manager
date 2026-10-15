@@ -57,15 +57,20 @@ usersRouter.delete('/:id', async (req, res) => {
 
 // Set exactly which items (and how many of each) a collector holds. Items
 // they hold now but not in `picks` go back to stock; picked items are set
-// to the requested quantity, capped by what's actually available.
+// to the requested quantity, capped by what's actually available. Any
+// quantity added writes a Check Out log row, any quantity removed writes a
+// Check In — same history the Inventory tab's own Assign/Return already
+// write, so a kit change here shows up in the History tab too.
 usersRouter.post('/:id/kit', async (req, res) => {
   try {
     const collectorId = req.params.id;
     const picks = req.body?.picks as { itemId: string; quantity: number }[];
+    const byName = (req.body?.byName as string) || 'Admin';
     const collector = await prisma.user.findUnique({ where: { id: collectorId } });
     if (!collector) return res.status(404).json({ ok: false, error: 'Login not found.' });
 
     await prisma.$transaction(async (tx) => {
+      const at = nowIso();
       for (const pick of picks) {
         const item = await tx.inventoryItem.findUnique({ where: { id: pick.itemId }, include: { holders: true, issues: true } });
         if (!item) continue;
@@ -75,16 +80,44 @@ usersRouter.post('/:id/kit', async (req, res) => {
         const available = Math.max(0, item.quantity - held - reported);
         const cap = available + (existing?.quantity || 0);
         const qty = Math.max(1, Math.min(pick.quantity, cap));
+        const prevQty = existing?.quantity || 0;
         if (existing) await tx.inventoryHolder.update({ where: { id: existing.id }, data: { quantity: qty } });
         else await tx.inventoryHolder.create({ data: { itemId: item.id, collectorId, quantity: qty } });
-        await tx.inventoryItem.update({ where: { id: item.id }, data: { updatedAt: nowIso() } });
+        await tx.inventoryItem.update({ where: { id: item.id }, data: { updatedAt: at } });
+
+        if (qty > prevQty) {
+          await tx.inventoryLog.create({
+            data: {
+              itemId: item.id, itemName: item.name, itemCode: item.itemId, activity: 'Check Out',
+              personId: collectorId, personName: collector.name, quantity: qty - prevQty, ok: null, note: '',
+              at, createdBy: byName,
+            },
+          });
+        } else if (qty < prevQty) {
+          await tx.inventoryLog.create({
+            data: {
+              itemId: item.id, itemName: item.name, itemCode: item.itemId, activity: 'Check In',
+              personId: collectorId, personName: collector.name, quantity: prevQty - qty, ok: null, note: '',
+              at, createdBy: byName,
+            },
+          });
+        }
       }
       const pickedIds = new Set(picks.map(p => p.itemId));
-      const currentHoldings = await tx.inventoryHolder.findMany({ where: { collectorId }, select: { id: true, itemId: true } });
+      const currentHoldings = await tx.inventoryHolder.findMany({
+        where: { collectorId }, include: { item: true },
+      });
       const toRemove = currentHoldings.filter(h => !pickedIds.has(h.itemId));
       if (toRemove.length) {
         await tx.inventoryHolder.deleteMany({ where: { id: { in: toRemove.map(h => h.id) } } });
-        await tx.inventoryItem.updateMany({ where: { id: { in: toRemove.map(h => h.itemId) } }, data: { updatedAt: nowIso() } });
+        await tx.inventoryItem.updateMany({ where: { id: { in: toRemove.map(h => h.itemId) } }, data: { updatedAt: at } });
+        await tx.inventoryLog.createMany({
+          data: toRemove.map(h => ({
+            itemId: h.itemId, itemName: h.item.name, itemCode: h.item.itemId, activity: 'Check In',
+            personId: collectorId, personName: collector.name, quantity: h.quantity, ok: null, note: '',
+            at, createdBy: byName,
+          })),
+        });
       }
     });
 

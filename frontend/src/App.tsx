@@ -248,7 +248,7 @@ export default function App() {
   };
 
   const setCollectorKit = (collectorId: string, picks: { itemId: string; quantity: number }[]) => withBusy(() => runAction(
-    () => api.setCollectorKit(collectorId, picks),
+    () => api.setCollectorKit(collectorId, picks, currentUser?.name || 'Admin'),
     ({ inventory: updated }) => setInventory(updated),
     () => `Updated ${users.find(u => u.id === collectorId)?.name || 'collector'}'s equipment.`
   ));

@@ -234,7 +234,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       </div>
 
       {tab === 'history' ? (
-        <InventoryHistoryTab currentUserName={currentUserName} />
+        <InventoryHistoryTab currentUserName={currentUserName} inventory={inventory} dataCollectors={dataCollectors} />
       ) : (
       <>
       {/* Stat overview */}
@@ -460,14 +460,25 @@ function csvCell(v: string): string {
 }
 
 /** Full check-in/check-out history across every item, with CSV export and manual admin correction. */
-const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUserName }) => {
+const InventoryHistoryTab: React.FC<{ currentUserName: string; inventory: InventoryItem[]; dataCollectors: UserAccount[] }> = ({ currentUserName, inventory, dataCollectors }) => {
   const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [workerFilter, setWorkerFilter] = useState('');
   const [editingLog, setEditingLog] = useState<InventoryLog | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Same category list as the Inventory tab's own filter, so the two stay
+  // consistent — and a category lookup by item id to filter log rows by it
+  // (a log row only stores itemId/itemCode/itemName, not category).
+  const categories = useMemo(
+    () => Array.from(new Set(inventory.map(i => i.category).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [inventory]
+  );
+  const categoryByItemId = useMemo(() => new Map(inventory.map(i => [i.id, i.category])), [inventory]);
 
   const removeLog = async (l: InventoryLog) => {
     if (!window.confirm(`Delete this ${l.activity} entry for ${l.personName} (${l.itemCode})? This cannot be undone.`)) return;
@@ -496,8 +507,11 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
     const logDate = l.at.slice(0, 10);
     const matchesFrom = !fromDate || logDate >= fromDate;
     const matchesTo = !toDate || logDate <= toDate;
-    return matchesQ && matchesFrom && matchesTo;
+    const matchesCategory = !categoryFilter || categoryByItemId.get(l.itemId) === categoryFilter;
+    const matchesWorker = !workerFilter || l.personId === workerFilter;
+    return matchesQ && matchesFrom && matchesTo && matchesCategory && matchesWorker;
   });
+  const hasFilters = !!(q || fromDate || toDate || categoryFilter || workerFilter);
 
   // Pair each check-out with the check-in that closes it (same item + same
   // person, next in time) so the two sit together — check-out on top,
@@ -568,9 +582,19 @@ const InventoryHistoryTab: React.FC<{ currentUserName: string }> = ({ currentUse
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
             className="text-xs bg-transparent focus:outline-none" />
         </label>
-        {(fromDate || toDate) && (
-          <button onClick={() => { setFromDate(''); setToDate(''); }}
-            className="text-xs text-blue-600 hover:underline">Clear dates</button>
+        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+          className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">All categories</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={workerFilter} onChange={e => setWorkerFilter(e.target.value)}
+          className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">All field workers</option>
+          {dataCollectors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {hasFilters && (
+          <button onClick={() => { setQ(''); setFromDate(''); setToDate(''); setCategoryFilter(''); setWorkerFilter(''); }}
+            className="text-xs text-blue-600 hover:underline">Clear filters</button>
         )}
         <span className="text-[11px] text-slate-400">{filtered.length} of {logs.length} entries · times shown in GMT+0</span>
         <button onClick={exportCsv} disabled={filtered.length === 0}
